@@ -1,0 +1,8 @@
+torch>=2.2
+numpy
+pillow
+pyyaml
+lpips          # optional, LPIPS metric
+scikit-image   # optional, metric cross-check
+onnx           # INT8 export
+onnxruntime    # export parity check / CPU latency

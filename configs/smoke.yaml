@@ -1,0 +1,117 @@
+# End-to-end smoke test on procedural toy data (CPU, ~5 min). Numbers are meaningless.
+# Order is denoise-first only because toy SR barely learns in 250 iters; real order is in cl_adapters.yaml.
+name: smoke
+seed: 0
+workers: 0
+ema: 0.9
+teacher: random
+model:
+  dim: 32
+  depth: 2
+  heads: 2
+  ws: 8
+  d_fdi: 64
+  enc_width: 16
+  se_rank: 8
+  lora_rank: 4
+loss:
+  fdi: 0.1
+  freq: 0.05
+  task: 0.05
+  dual: 0.1
+  dual_sigma: 2.0
+cl:
+  mode: adapters
+  replay_per_task: 16
+  replay_ratio: 0.25
+  ewc_lambda: 1.0
+  ewc_batches: 2
+stages:
+- task: denoise
+  iters: 250
+  lr: 0.001
+  batch: 4
+  patch: 64
+  warmup: 10
+  train:
+  - type: synthetic
+    hq_dir: toy_data/train/hq
+- task: jpeg
+  iters: 250
+  lr: 0.001
+  batch: 4
+  patch: 64
+  warmup: 10
+  train:
+  - type: synthetic
+    hq_dir: toy_data/train/hq
+- task: deblur
+  iters: 250
+  lr: 0.001
+  batch: 4
+  patch: 64
+  warmup: 10
+  train:
+  - type: paired
+    lq_dir: toy_data/train/blur_lq
+    hq_dir: toy_data/train/blur_hq
+- task: sr
+  iters: 250
+  lr: 0.001
+  batch: 4
+  patch: 64
+  warmup: 10
+  train:
+  - type: synthetic
+    hq_dir: toy_data/train/hq
+eval:
+  sr:
+  - name: toy_x4
+    type: synthetic
+    hq_dir: toy_data/test/hq
+    params:
+      scale: 4
+  denoise:
+  - name: toy_s25
+    type: synthetic
+    hq_dir: toy_data/test/hq
+    params:
+      sigma: 25
+  deblur:
+  - name: toy_blur
+    type: paired
+    lq_dir: toy_data/test/blur_lq
+    hq_dir: toy_data/test/blur_hq
+  jpeg:
+  - name: toy_q20
+    type: synthetic
+    hq_dir: toy_data/test/hq
+    params:
+      quality: 20
+  compound:
+  - name: toy_blur_noise_jpeg
+    type: synthetic
+    hq_dir: toy_data/test/hq
+    params:
+      chain:
+      - - deblur
+        - sigma: 1.5
+      - - denoise
+        - sigma: 15
+      - - jpeg
+        - quality: 30
+log_every: 1000
+qat:
+  per_task: 16
+  calib_batches: 2
+  batch: 8
+  iters: 60
+  lr: 5.0e-05
+  observer_warmup: 20
+  kd: 1.0
+  keep_fp:
+  - shallow.0
+  - out
+  quant_attn: true
+  export_size: 64
+  log_every: 20

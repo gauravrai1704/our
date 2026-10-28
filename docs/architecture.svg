@@ -1,0 +1,208 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="960" viewBox="0 0 1500 960" font-family="Inter, Helvetica, Arial, sans-serif">
+<defs><marker id="ah-047857" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#047857"/></marker><marker id="ah-4b5563" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4b5563"/></marker><marker id="ah-1d4ed8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1d4ed8"/></marker><marker id="ah-6d28d9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6d28d9"/></marker><marker id="ah-6b7280" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6b7280"/></marker><marker id="ah-c2410c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c2410c"/></marker></defs>
+<rect width="1500" height="960" fill="white"/>
+<text x="30" y="34" font-size="17" font-weight="700" fill="#1f2937" text-anchor="start">(a) RestoreNet — one compact network for SR, denoising, deblurring and JPEG removal</text>
+<text x="30" y="54" font-size="12" font-weight="normal" fill="#6b7280" text-anchor="start">solid = deployed inference path   ·   dashed = training only   ·   blue = degradation (FDI) conditioning   ·   orange = per-task LoRA adapter points</text>
+<rect x="30" y="262.0" width="115" height="76" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="87.5" y="287.875" font-size="12.5" font-weight="600" fill="#1f2937" text-anchor="middle">LQ image</text>
+<text x="87.5" y="304.375" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">H×W×3</text>
+<text x="87.5" y="320.875" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">(SR: bicubic-up)</text>
+<rect x="185" y="128" width="280" height="64" rx="8" fill="#eff6ff" stroke="#1d4ed8" stroke-width="1.4"/>
+<text x="325.0" y="156.125" font-size="12.5" font-weight="600" fill="#1d4ed8" text-anchor="middle">Degradation encoder</text>
+<text x="325.0" y="172.625" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">5 conv (stride 2) → mean+std pool → MLP</text>
+<polyline points="87,262.0 87,160 183,160" fill="none" stroke="#1d4ed8" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-1d4ed8)"/>
+<rect x="505" y="136" width="160" height="48" rx="8" fill="white" stroke="#1d4ed8" stroke-width="1.4"/>
+<text x="585.0" y="156.125" font-size="12.5" font-weight="600" fill="#1d4ed8" text-anchor="middle">FDI embedding f</text>
+<text x="585.0" y="172.625" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">f ∈ ℝ^256, once per image</text>
+<polyline points="465,160 503,160" fill="none" stroke="#1d4ed8" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-1d4ed8)"/>
+<rect x="505" y="70" width="160" height="44" rx="8" fill="white" stroke="#6b7280" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="585.0" y="88.125" font-size="12.5" font-weight="600" fill="#1f2937" text-anchor="middle">FDI head (linear)</text>
+<text x="585.0" y="104.625" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">student → teacher space</text>
+<polyline points="585,136 585,116" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 4" marker-end="url(#ah-6b7280)"/>
+<rect x="700" y="66" width="330" height="52" rx="8" fill="white" stroke="#6b7280" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="865.0" y="88.125" font-size="12.5" font-weight="600" fill="#1f2937" text-anchor="middle">L_fdi = ‖head(f) − norm(T(LQ) − T(HQ))‖²</text>
+<text x="865.0" y="104.625" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">T = frozen DINOv2-S teacher (train-time only, 0 deploy cost)</text>
+<polyline points="665,92 698,92" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 4" marker-end="url(#ah-6b7280)"/>
+<rect x="1065" y="128" width="230" height="64" rx="8" fill="#f5f3ff" stroke="#6d28d9" stroke-width="1.4"/>
+<text x="1180.0" y="147.875" font-size="12.5" font-weight="600" fill="#6d28d9" text-anchor="middle">Task head (linear)</text>
+<text x="1180.0" y="164.375" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">L_task in training; at inference picks</text>
+<text x="1180.0" y="180.875" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">adapter t̂ — no task label</text>
+<polyline points="665,160 1063,160" fill="none" stroke="#6d28d9" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-6d28d9)"/>
+<text x="1180" y="214" font-size="11" font-weight="normal" fill="#6d28d9" text-anchor="middle" font-style="italic">routes ↓ which adapter set is active</text>
+<polyline points="585,184 585,214 1050,214" fill="none" stroke="#1d4ed8" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="585,214 585,260.0" fill="none" stroke="#1d4ed8" stroke-width="2" stroke-linejoin="round" marker-end="url(#ah-1d4ed8)"/>
+<polyline points="790,214 790,260.0" fill="none" stroke="#1d4ed8" stroke-width="2" stroke-linejoin="round" marker-end="url(#ah-1d4ed8)"/>
+<polyline points="1050,214 1050,260.0" fill="none" stroke="#1d4ed8" stroke-width="2" stroke-linejoin="round" marker-end="url(#ah-1d4ed8)"/>
+<text x="700" y="208" font-size="11" font-weight="normal" fill="#1d4ed8" text-anchor="middle" font-style="italic">f conditions every block + decoder</text>
+<rect x="185" y="262.0" width="120" height="76" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="245.0" y="287.875" font-size="12.5" font-weight="600" fill="#1f2937" text-anchor="middle">Shallow conv</text>
+<text x="245.0" y="304.375" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">3×3, 32 ch</text>
+<text x="245.0" y="320.875" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">full resolution</text>
+<polyline points="145,300 183,300" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="340" y="262.0" width="130" height="76" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="405.0" y="287.875" font-size="12.5" font-weight="600" fill="#1f2937" text-anchor="middle">PixelUnshuffle ×4</text>
+<text x="405.0" y="304.375" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">+ 1×1 conv</text>
+<text x="405.0" y="320.875" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">→ 96 ch, H/4×W/4</text>
+<polyline points="305,300 338,300" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="505" y="262.0" width="165" height="76" rx="8" fill="white" stroke="#1f2937" stroke-width="2"/>
+<text x="587.5" y="287.875" font-size="12.5" font-weight="600" fill="#1f2937" text-anchor="middle">8 × Gated block</text>
+<text x="587.5" y="304.375" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">window attn + FFN</text>
+<text x="587.5" y="320.875" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">SE-gated by f</text>
+<rect x="538" y="344.0" width="105.60000000000001" height="18" rx="9" fill="#fff7ed" stroke="#c2410c" stroke-width="1"/>
+<text x="590.8" y="357.0" font-size="10.5" font-weight="600" fill="#c2410c" text-anchor="middle">LoRA on gates</text>
+<polyline points="470,300 503,300" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="705" y="262.0" width="125" height="76" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="767.5" y="287.875" font-size="12.5" font-weight="600" fill="#1f2937" text-anchor="middle">LayerNorm</text>
+<text x="767.5" y="304.375" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">+ AdaIN-1(f)</text>
+<text x="767.5" y="320.875" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">96 ch</text>
+<rect x="712" y="344.0" width="98.4" height="18" rx="9" fill="#fff7ed" stroke="#c2410c" stroke-width="1"/>
+<text x="761.2" y="357.0" font-size="10.5" font-weight="600" fill="#c2410c" text-anchor="middle">LoRA on γ, β</text>
+<polyline points="670,300 703,300" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="865" y="262.0" width="130" height="76" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="930.0" y="287.875" font-size="12.5" font-weight="600" fill="#1f2937" text-anchor="middle">1×1 conv +</text>
+<text x="930.0" y="304.375" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">PixelShuffle ×4</text>
+<text x="930.0" y="320.875" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">→ 32 ch, H×W</text>
+<polyline points="830,300 863,300" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<circle cx="1020" cy="300" r="11" fill="white" stroke="#4b5563" stroke-width="1.6"/>
+<path d="M1014,300 H1026 M1020,294 V306" stroke="#4b5563" stroke-width="1.6"/>
+<polyline points="995,300 1007,300" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="1050" y="262.0" width="110" height="76" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="1105.0" y="296.125" font-size="12.5" font-weight="600" fill="#1f2937" text-anchor="middle">AdaIN-2(f)</text>
+<text x="1105.0" y="312.625" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">32 ch</text>
+<rect x="1052" y="344.0" width="98.4" height="18" rx="9" fill="#fff7ed" stroke="#c2410c" stroke-width="1"/>
+<text x="1101.2" y="357.0" font-size="10.5" font-weight="600" fill="#c2410c" text-anchor="middle">LoRA on γ, β</text>
+<polyline points="1031,300 1048,300" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="1190" y="262.0" width="100" height="76" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="1240.0" y="287.875" font-size="12.5" font-weight="600" fill="#1f2937" text-anchor="middle">Conv 3×3</text>
+<text x="1240.0" y="304.375" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">→ 3 ch</text>
+<text x="1240.0" y="320.875" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">(residual)</text>
+<polyline points="1160,300 1188,300" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<circle cx="1318" cy="300" r="11" fill="white" stroke="#4b5563" stroke-width="1.6"/>
+<path d="M1312,300 H1324 M1318,294 V306" stroke="#4b5563" stroke-width="1.6"/>
+<polyline points="1290,300 1305,300" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="1350" y="262.0" width="120" height="76" rx="8" fill="#ecfdf5" stroke="#047857" stroke-width="1.4"/>
+<text x="1410.0" y="287.875" font-size="12.5" font-weight="600" fill="#047857" text-anchor="middle">Restored</text>
+<text x="1410.0" y="304.375" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">image</text>
+<text x="1410.0" y="320.875" font-size="11.0" font-weight="normal" fill="#6b7280" text-anchor="middle">H×W×3</text>
+<polyline points="1329,300 1348,300" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<polyline points="245,338.0 245,388 1020,388 1020,313" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<text x="640" y="383" font-size="11" font-weight="normal" fill="#6b7280" text-anchor="middle" font-style="italic">full-resolution skip (carries fine detail the 4× latent cannot)</text>
+<polyline points="87,338.0 87,414 1318,414 1318,313" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<text x="700" y="409" font-size="11" font-weight="normal" fill="#6b7280" text-anchor="middle" font-style="italic">global residual: output = LQ + predicted correction</text>
+<rect x="30" y="436" width="1440" height="130" rx="10" fill="white" stroke="#94a3b8" stroke-dasharray="3 3"/>
+<text x="42" y="456" font-size="13" font-weight="700" fill="#1f2937" text-anchor="start">Inside a gated block</text>
+<rect x="42" y="478" width="30" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="57.0" y="499.2" font-size="12" font-weight="600" fill="#1f2937" text-anchor="middle">z</text>
+<polyline points="72,495 82,495" fill="none" stroke="#4b5563" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="84" y="478" width="42" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="105.0" y="499.2" font-size="12" font-weight="600" fill="#1f2937" text-anchor="middle">LN</text>
+<polyline points="126,495 136,495" fill="none" stroke="#4b5563" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="138" y="478" width="92" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="184.0" y="499.2" font-size="12" font-weight="600" fill="#1f2937" text-anchor="middle">W-MSA</text>
+<polyline points="230,495 240,495" fill="none" stroke="#4b5563" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="242" y="478" width="76" height="34" rx="8" fill="#eff6ff" stroke="#1d4ed8" stroke-width="1.4"/>
+<text x="280.0" y="499.2" font-size="12" font-weight="600" fill="#1d4ed8" text-anchor="middle">⊗ g_a(f)</text>
+<polyline points="318,495 328,495" fill="none" stroke="#4b5563" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="330" y="478" width="26" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="343.0" y="499.2" font-size="12" font-weight="600" fill="#1f2937" text-anchor="middle">⊕</text>
+<polyline points="356,495 366,495" fill="none" stroke="#4b5563" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="368" y="478" width="42" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="389.0" y="499.2" font-size="12" font-weight="600" fill="#1f2937" text-anchor="middle">LN</text>
+<polyline points="410,495 420,495" fill="none" stroke="#4b5563" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="422" y="478" width="72" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="458.0" y="499.2" font-size="12" font-weight="600" fill="#1f2937" text-anchor="middle">FFN 2×</text>
+<polyline points="494,495 504,495" fill="none" stroke="#4b5563" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="506" y="478" width="76" height="34" rx="8" fill="#eff6ff" stroke="#1d4ed8" stroke-width="1.4"/>
+<text x="544.0" y="499.2" font-size="12" font-weight="600" fill="#1d4ed8" text-anchor="middle">⊗ g_f(f)</text>
+<polyline points="582,495 592,495" fill="none" stroke="#4b5563" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="594" y="478" width="26" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="607.0" y="499.2" font-size="12" font-weight="600" fill="#1f2937" text-anchor="middle">⊕</text>
+<text x="42" y="534" font-size="11" font-weight="normal" fill="#6b7280" text-anchor="start">W-MSA: 8×8 windows, 4 heads; odd blocks shift by 4 px.  Residual adds around each gated branch.</text>
+<text x="42" y="550" font-size="11" font-weight="normal" fill="#6b7280" text-anchor="start">Attention matmul inputs (q, k, v, softmax) carry INT8 quantizers after QAT.</text>
+<text x="680" y="456" font-size="13" font-weight="700" fill="#1f2937" text-anchor="start">SE gate g(f)</text>
+<rect x="680" y="478" width="26" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="693.0" y="499.2" font-size="12" font-weight="600" fill="#1f2937" text-anchor="middle">f</text>
+<polyline points="706,495 715,495" fill="none" stroke="#4b5563" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="717" y="478" width="70" height="34" rx="8" fill="#fff7ed" stroke="#c2410c" stroke-width="1.4"/>
+<text x="752.0" y="499.2" font-size="12" font-weight="600" fill="#c2410c" text-anchor="middle">FC +BA</text>
+<polyline points="787,495 796,495" fill="none" stroke="#4b5563" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="798" y="478" width="46" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="821.0" y="499.2" font-size="12" font-weight="600" fill="#1f2937" text-anchor="middle">ReLU</text>
+<polyline points="844,495 853,495" fill="none" stroke="#4b5563" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="855" y="478" width="70" height="34" rx="8" fill="#fff7ed" stroke="#c2410c" stroke-width="1.4"/>
+<text x="890.0" y="499.2" font-size="12" font-weight="600" fill="#c2410c" text-anchor="middle">FC +BA</text>
+<polyline points="925,495 934,495" fill="none" stroke="#4b5563" stroke-width="1.2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="936" y="478" width="30" height="34" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="951.0" y="499.2" font-size="12" font-weight="600" fill="#1f2937" text-anchor="middle">σ</text>
+<text x="680" y="534" font-size="11" font-weight="normal" fill="#6b7280" text-anchor="start">σ init ≈ 0.88 (gate starts open)</text>
+<text x="1000" y="456" font-size="13" font-weight="700" fill="#1f2937" text-anchor="start">AdaIN(x, f)  and  per-task LoRA</text>
+<text x="1000" y="492" font-size="12" font-weight="normal" fill="#1f2937" text-anchor="start">y = x + γ(f) · IN(x) + β(f),   [γ, β] = FC(ReLU(FC(f)))</text>
+<text x="1000" y="514" font-size="12" font-weight="600" fill="#c2410c" text-anchor="start">LoRA layer:  W x + b + (α/r) · B_t A_t x</text>
+<text x="1000" y="534" font-size="11" font-weight="normal" fill="#6b7280" text-anchor="start">task 0 trains W; task t adds its own (A_t, B_t), rank 8;</text>
+<text x="1000" y="550" font-size="11" font-weight="normal" fill="#6b7280" text-anchor="start">B_t = 0 at init so a new task starts from the old behaviour</text>
+<text x="30" y="606" font-size="17" font-weight="700" fill="#1f2937" text-anchor="start">(b) Continual training → INT8 quantization → edge deployment</text>
+<rect x="30" y="628" width="200" height="150" rx="8" fill="white" stroke="#1f2937" stroke-width="1.6"/>
+<text x="130.0" y="673.55" font-size="13" font-weight="600" fill="#1f2937" text-anchor="middle">Stage 0 · SR ×2/3/4</text>
+<text x="130.0" y="690.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">DF2K, bicubic</text>
+<text x="130.0" y="707.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">train ALL params</text>
+<text x="130.0" y="724.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">L_rec + L_fdi + L_freq</text>
+<text x="130.0" y="741.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">+ L_dual + L_task</text>
+<polyline points="230,703.0 256,703.0" fill="none" stroke="#4b5563" stroke-width="2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="258" y="628" width="200" height="150" rx="8" fill="white" stroke="#1f2937" stroke-width="1.6"/>
+<text x="358.0" y="673.55" font-size="13" font-weight="600" fill="#1f2937" text-anchor="middle">Stage 1 · Denoise</text>
+<text x="358.0" y="690.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">DF2K + BSD400 + WED</text>
+<text x="358.0" y="707.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">σ ∈ [0, 50]</text>
+<text x="358.0" y="724.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">freeze base; add LoRA_dn</text>
+<text x="358.0" y="741.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">train enc. + heads</text>
+<polyline points="458,703.0 484,703.0" fill="none" stroke="#4b5563" stroke-width="2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="486" y="628" width="200" height="150" rx="8" fill="white" stroke="#1f2937" stroke-width="1.6"/>
+<text x="586.0" y="673.55" font-size="13" font-weight="600" fill="#1f2937" text-anchor="middle">Stage 2 · Deblur</text>
+<text x="586.0" y="690.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">GoPro pairs</text>
+<text x="586.0" y="707.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">patch 256</text>
+<text x="586.0" y="724.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">freeze base; add LoRA_db</text>
+<text x="586.0" y="741.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">+ replay + EWC</text>
+<polyline points="686,703.0 712,703.0" fill="none" stroke="#4b5563" stroke-width="2" stroke-linejoin="round" marker-end="url(#ah-4b5563)"/>
+<rect x="714" y="628" width="200" height="150" rx="8" fill="white" stroke="#1f2937" stroke-width="1.6"/>
+<text x="814.0" y="673.55" font-size="13" font-weight="600" fill="#1f2937" text-anchor="middle">Stage 3 · JPEG</text>
+<text x="814.0" y="690.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">DF2K + BSD400</text>
+<text x="814.0" y="707.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">q ∈ [10, 40]</text>
+<text x="814.0" y="724.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">freeze base; add LoRA_jp</text>
+<text x="814.0" y="741.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">+ replay + EWC</text>
+<text x="1470" y="606" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="end">FP32 · AdamW + cosine LR · EMA weights · one checkpoint per stage</text>
+<polyline points="914,703.0 950,703.0" fill="none" stroke="#047857" stroke-width="2" stroke-linejoin="round" marker-end="url(#ah-047857)"/>
+<rect x="952" y="628" width="158" height="150" rx="8" fill="#ecfdf5" stroke="#047857" stroke-width="1.6"/>
+<text x="1031.0" y="673.55" font-size="13" font-weight="600" fill="#047857" text-anchor="middle">INT8 PTQ → QAT</text>
+<text x="1031.0" y="690.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">calibrate observers on</text>
+<text x="1031.0" y="707.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">ALL tasks (own adapter)</text>
+<text x="1031.0" y="724.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">QAT: task-balanced replay,</text>
+<text x="1031.0" y="741.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">KD from FP32, LR 5e-6</text>
+<polyline points="1110,703.0 1130,703.0" fill="none" stroke="#047857" stroke-width="2" stroke-linejoin="round" marker-end="url(#ah-047857)"/>
+<rect x="1132" y="628" width="158" height="150" rx="8" fill="#ecfdf5" stroke="#047857" stroke-width="1.6"/>
+<text x="1211.0" y="673.55" font-size="13" font-weight="600" fill="#047857" text-anchor="middle">ONNX QDQ export</text>
+<text x="1211.0" y="690.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">one graph per task</text>
+<text x="1211.0" y="707.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">(adapter baked in)</text>
+<text x="1211.0" y="724.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">parity: ORT vs PyTorch</text>
+<text x="1211.0" y="741.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">fake-quant output</text>
+<polyline points="1290,703.0 1310,703.0" fill="none" stroke="#047857" stroke-width="2" stroke-linejoin="round" marker-end="url(#ah-047857)"/>
+<rect x="1312" y="628" width="158" height="150" rx="8" fill="#ecfdf5" stroke="#047857" stroke-width="1.6"/>
+<text x="1391.0" y="673.55" font-size="13" font-weight="600" fill="#047857" text-anchor="middle">Edge deployment</text>
+<text x="1391.0" y="690.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">TensorRT INT8 engine</text>
+<text x="1391.0" y="707.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">(e.g. Jetson Orin Nano)</text>
+<text x="1391.0" y="724.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">W: per-channel sym.</text>
+<text x="1391.0" y="741.55" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">A: per-tensor asym.</text>
+<rect x="258" y="812" width="852" height="46" rx="23" fill="#f5f3ff" stroke="#6d28d9" stroke-width="1.4"/>
+<text x="684.0" y="831" font-size="13" font-weight="600" fill="#6d28d9" text-anchor="middle">Replay buffer — ~500 LQ/HQ patches per finished task (reservoir)</text>
+<text x="684.0" y="848" font-size="11" font-weight="normal" fill="#6b7280" text-anchor="middle">25% of every later batch · source of all-task calibration and QAT data</text>
+<polyline points="358.0,812 358.0,780" fill="none" stroke="#6d28d9" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-6d28d9)"/>
+<polyline points="586.0,812 586.0,780" fill="none" stroke="#6d28d9" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-6d28d9)"/>
+<polyline points="814.0,812 814.0,780" fill="none" stroke="#6d28d9" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-6d28d9)"/>
+<polyline points="1031.0,812 1031.0,780" fill="none" stroke="#6d28d9" stroke-width="1.6" stroke-linejoin="round" marker-end="url(#ah-6d28d9)"/>
+<polyline points="130.0,778 130.0,835 256,835" fill="none" stroke="#6d28d9" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 4" marker-end="url(#ah-6d28d9)"/>
+<text x="36" y="852" font-size="10.5" font-weight="normal" fill="#6d28d9" text-anchor="start" font-style="italic">filled after each stage</text>
+<rect x="30" y="874" width="884" height="66" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="472.0" y="903.05" font-size="13" font-weight="600" fill="#1f2937" text-anchor="middle">After every stage: evaluate ALL tasks (oracle + inferred routing)</text>
+<text x="472.0" y="920.05" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">R[i][j] PSNR matrix → ACC · BWT · FGT   |   held-out compound set (RQ4)   |   FDI linear probe (RQ2)</text>
+<rect x="952" y="874" width="518" height="66" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+<text x="1211.0" y="903.05" font-size="13" font-weight="600" fill="#1f2937" text-anchor="middle">Report: FP32 vs PTQ vs QAT, per task</text>
+<text x="1211.0" y="920.05" font-size="11.5" font-weight="normal" fill="#6b7280" text-anchor="middle">ΔPSNR / ΔLPIPS · BWT before vs after QAT · params, GFLOPs, latency</text>
+</svg>

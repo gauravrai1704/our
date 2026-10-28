@@ -1,0 +1,88 @@
+# Proposed method: SR -> denoise -> deblur -> JPEG with per-task adapters + replay (+EWC).
+# Paths assume the layout in README.md (datasets/...). Sized for one RTX A4000 (16 GB).
+name: cl_adapters
+seed: 0
+workers: 6
+amp: true
+ema: 0.999
+weight_decay: 1.0e-4
+eval_tile: 256            # tiled full-image eval keeps memory bounded
+teacher: dinov2_vits14    # train-time only; set to none to ablate the FDI-regression loss
+model: {dim: 96, depth: 8, heads: 4, ws: 8, d_fdi: 256, enc_width: 64, se_rank: 32,
+        lora_rank: 8, lora_backbone: false}
+loss: {fdi: 0.1, freq: 0.05, task: 0.05, dual: 0.1, dual_sigma: 2.0}
+cl:
+  mode: adapters          # adapters | finetune | joint
+  replay_per_task: 500
+  replay_ratio: 0.25
+  ewc_lambda: 100.0       # sweep {0, 10, 100, 1000}
+  ewc_batches: 50
+  shared_trainable: ["degr.*", "task_head.*", "fdi_head.*"]
+stages:
+  - task: sr
+    iters: 200000
+    lr: 2.0e-4
+    batch: 8
+    patch: 192
+    warmup: 2000
+    train: [{type: synthetic, hq_dir: datasets/DF2K/HR, repeat: 20}]
+  - task: denoise
+    iters: 60000
+    lr: 1.0e-4
+    batch: 8
+    patch: 192
+    warmup: 1000
+    train:
+      - {type: synthetic, hq_dir: datasets/DF2K/HR, repeat: 10}
+      - {type: synthetic, hq_dir: datasets/BSD400, repeat: 10}
+      - {type: synthetic, hq_dir: datasets/WED, repeat: 1}
+  - task: deblur
+    iters: 60000
+    lr: 1.0e-4
+    batch: 8
+    patch: 256            # motion blur needs a larger receptive field
+    warmup: 1000
+    train: [{type: paired, lq_dir: datasets/GoPro/train/blur, hq_dir: datasets/GoPro/train/sharp, repeat: 5}]
+  - task: jpeg
+    iters: 60000
+    lr: 1.0e-4
+    batch: 8
+    patch: 192
+    warmup: 1000
+    train:
+      - {type: synthetic, hq_dir: datasets/DF2K/HR, repeat: 10}
+      - {type: synthetic, hq_dir: datasets/BSD400, repeat: 10}
+eval:
+  sr:
+    - {name: Set5_x4,     type: paired, lq_dir: datasets/benchmark/Set5/LR_bicubic/X4,     hq_dir: datasets/benchmark/Set5/HR,     sr_scale: 4}
+    - {name: Urban100_x4, type: paired, lq_dir: datasets/benchmark/Urban100/LR_bicubic/X4, hq_dir: datasets/benchmark/Urban100/HR, sr_scale: 4}
+  denoise:
+    - {name: CBSD68_s25,  type: synthetic, hq_dir: datasets/CBSD68, params: {sigma: 25}}
+    - {name: Kodak24_s50, type: synthetic, hq_dir: datasets/Kodak24, params: {sigma: 50}}
+  deblur:
+    - {name: GoPro_test,  type: paired, lq_dir: datasets/GoPro/test/blur, hq_dir: datasets/GoPro/test/sharp}
+  jpeg:
+    - {name: LIVE1_q10,   type: synthetic, hq_dir: datasets/LIVE1, params: {quality: 10}}
+    - {name: LIVE1_q30,   type: synthetic, hq_dir: datasets/LIVE1, params: {quality: 30}}
+  # RQ4: held-out compound degradations. Fixed BEFORE training; never trained on.
+  compound:
+    - {name: DIV2Kval_blur_noise_jpeg, type: synthetic, hq_dir: datasets/DIV2K/valid_HR,
+       params: {chain: [[deblur, {sigma: 1.5}], [denoise, {sigma: 15}], [jpeg, {quality: 30}]]}}
+    - {name: DIV2Kval_down_noise, type: synthetic, hq_dir: datasets/DIV2K/valid_HR,
+       params: {chain: [[sr, {scale: 2}], [denoise, {sigma: 25}]]}}
+qat:
+  per_task: 500             # replay patches per task (calibration + QAT data)
+  calib_batches: 16
+  batch: 16                 # task-balanced
+  iters: 5000
+  lr: 5.0e-6
+  observer_warmup: 500      # observers frozen after this
+  kd: 1.0                   # output distillation from the FP32 model
+  train: all                # all | adapters
+  keep_fp: [shallow.0, out] # revise after: python qat.py ... --sensitivity
+  quant_attn: true
+  export_size: 256
+  log_every: 250
+# During development keep eval small (above). For the paper add Set14, BSD100, Manga109,
+# DIV2K-val, RealSR, DRealSR, McMaster, SIDD, HIDE, RealBlur, Classic5, and the held-out
+# compound set.

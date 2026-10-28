@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+runs/
+toy_data/
+datasets/
+*.pt
+*.pth
+*.onnx
+.DS_Store
