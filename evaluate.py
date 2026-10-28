@@ -3,19 +3,25 @@
 routing="oracle"   : use the ground-truth task's adapter
 routing="inferred" : pick the adapter from argmax of the FDI task head over seen tasks
                      (RQ2: can the degradation embedding replace an explicit task label?)
+routing="ncm"      : pick the adapter of the nearest task prototype (cosine, FDI space)
+routing="soft"     : mix all adapters, weighted by softmax(task_head(fdi) / T) over seen tasks
+                     (RQ4: compound degradations need several adapters at once)
 
 Standalone use:
     python evaluate.py --config configs/smoke.yaml --ckpt runs/smoke/stage3.pt --routing inferred
+    python evaluate.py --config configs/smoke.yaml --ckpt runs/smoke/stage3.pt --routing soft --temp 1.0
     python evaluate.py --config configs/smoke.yaml --ckpt runs/smoke/qat/qat.pt --qat
 
 Eval entries under a non-task key (e.g. `compound:`) are held-out mixed degradations;
-they are always routed by the FDI task head, and the routing histogram is recorded.
+they are always routed by the FDI task head (hard, or soft with routing="soft"), and
+the routing histogram is recorded.
 """
 import argparse
 import json
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from data.datasets import PairedDataset, SyntheticTaskDataset
@@ -58,7 +64,29 @@ def tiled_forward(model, x, tile=0, overlap=32):
 
 
 @torch.no_grad()
-def evaluate(model, eval_sets, adapter_keys, seen_tasks, device, routing="oracle", tile=0, lpips_fn=None):
+def route(model, lq, adapter_keys, seen_ids, mode="inferred", temp=1.0):
+    """FDI-based routing. Returns (predicted task id, value for set_active_task)."""
+    set_active_task(model, None)
+    f = model.degr(lq)
+    if mode == "ncm":
+        sims = F.normalize(f.float(), dim=1) @ model.protos[seen_ids].t()
+        pred = seen_ids[int(sims.mean(0).argmax())]
+        return pred, adapter_keys.get(pred)
+    logits = model.task_head(f)[:, seen_ids].float()
+    pred = seen_ids[int(logits.mean(0).argmax())]
+    if mode != "soft":
+        return pred, adapter_keys.get(pred)
+    p = (logits / temp).softmax(1).mean(0).tolist()
+    mix = {}
+    for sid, w in zip(seen_ids, p):
+        k = adapter_keys.get(sid)
+        mix[k] = mix.get(k, 0.0) + w
+    return pred, mix
+
+
+@torch.no_grad()
+def evaluate(model, eval_sets, adapter_keys, seen_tasks, device, routing="oracle", tile=0, lpips_fn=None,
+             temp=1.0):
     """adapter_keys: {task_id: adapter key or None}. Returns {task: {dataset: metrics}}."""
     model.eval()
     lpips_fn = lpips_fn or LPIPSMetric(device)
@@ -70,15 +98,15 @@ def evaluate(model, eval_sets, adapter_keys, seen_tasks, device, routing="oracle
             P, S, L, hit, routed = [], [], [], [], []
             for b in DataLoader(ds, batch_size=1, num_workers=2):
                 lq, hq = b["lq"].to(device), b["hq"].to(device)
-                if (routing == "inferred" or tid < 0) and len(seen_ids) > 1:
-                    set_active_task(model, None)
-                    logits = model.task_head(model.degr(lq))[:, seen_ids]
-                    pred_tid = seen_ids[int(logits.argmax(1))]
+                if (routing != "oracle" or tid < 0) and len(seen_ids) > 1:
+                    pred_tid, active = route(model, lq, adapter_keys, seen_ids,
+                                             routing if routing != "oracle" else "inferred", temp)
                 else:
                     pred_tid = tid if tid in adapter_keys else max(adapter_keys)
+                    active = adapter_keys.get(pred_tid)
                 hit.append(pred_tid == tid)
                 routed.append(TASKS[pred_tid])
-                set_active_task(model, adapter_keys.get(pred_tid))
+                set_active_task(model, active)
                 out = tiled_forward(model, lq, tile)
                 P += psnr(out, hq, task, scale)
                 S += ssim(out, hq, task, scale)
@@ -96,7 +124,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
     ap.add_argument("--ckpt", required=True)
-    ap.add_argument("--routing", default="oracle", choices=["oracle", "inferred"])
+    ap.add_argument("--routing", default="oracle", choices=["oracle", "inferred", "ncm", "soft"])
+    ap.add_argument("--temp", type=float, default=1.0, help="softmax temperature for --routing soft")
     ap.add_argument("--tile", type=int, default=0)
     ap.add_argument("--qat", action="store_true", help="ckpt is runs/<name>/qat/qat.pt")
     a = ap.parse_args()
@@ -108,7 +137,7 @@ def main():
     else:
         from common import load_checkpoint
         model, ck, keys = load_checkpoint(a.ckpt, dev)
-    res = evaluate(model, build_eval_sets(cfg), keys, ck["seen_tasks"], dev, a.routing, a.tile)
+    res = evaluate(model, build_eval_sets(cfg), keys, ck["seen_tasks"], dev, a.routing, a.tile, temp=a.temp)
     print(json.dumps(res, indent=2))
 
 

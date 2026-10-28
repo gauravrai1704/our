@@ -7,3 +7,4 @@ datasets/
 *.pth
 *.onnx
 .DS_Store
+configs/generated/

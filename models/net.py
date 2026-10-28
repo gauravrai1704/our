@@ -25,25 +25,37 @@ from .lora import TaskLoRALinear
 
 # ---------------------------------------------------------------- conditioning
 class DegradationEncoder(nn.Module):
-    """Small CNN: LQ image -> degradation embedding. Computed once per image."""
+    """Small CNN: LQ image -> degradation embedding. Computed once per image.
+
+    Degradation cues (noise, blocking, missing high frequencies) live mostly in the
+    high-pass band, so the input is [x, x - blur(x)]. Convs use variance-preserving init
+    and the pooled statistics are layer-normed: with PyTorch's default init, five plain
+    convs shrink the signal so much that the embedding is ~constant across inputs.
+    """
 
     def __init__(self, d_fdi=256, width=64):
         super().__init__()
         c = width
         self.net = nn.Sequential(
-            nn.Conv2d(3, c, 3, 1, 1), nn.GELU(),
-            nn.Conv2d(c, c, 3, 2, 1), nn.GELU(),
-            nn.Conv2d(c, 2 * c, 3, 2, 1), nn.GELU(),
-            nn.Conv2d(2 * c, 2 * c, 3, 2, 1), nn.GELU(),
-            nn.Conv2d(2 * c, 4 * c, 3, 2, 1), nn.GELU(),
+            nn.Conv2d(6, c, 3, 1, 1), nn.LeakyReLU(0.2),
+            nn.Conv2d(c, c, 3, 2, 1), nn.LeakyReLU(0.2),
+            nn.Conv2d(c, 2 * c, 3, 2, 1), nn.LeakyReLU(0.2),
+            nn.Conv2d(2 * c, 2 * c, 3, 2, 1), nn.LeakyReLU(0.2),
+            nn.Conv2d(2 * c, 4 * c, 3, 2, 1), nn.LeakyReLU(0.2),
         )
-        # mean + std pooling keeps degradation statistics (noise level, blur), not just content
+        for m in self.net:
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, a=0.2, nonlinearity="leaky_relu")
+                nn.init.zeros_(m.bias)
+        # mean + log-std pooling keeps degradation statistics (noise level, blur), not just content
+        self.norm = nn.LayerNorm(8 * c)
         self.mlp = nn.Sequential(nn.Linear(8 * c, 2 * d_fdi), nn.GELU(), nn.Linear(2 * d_fdi, d_fdi))
 
     def forward(self, x):
-        f = self.net(x)
-        pooled = torch.cat([f.mean((2, 3)), f.flatten(2).std(2)], 1)
-        return self.mlp(pooled)
+        hp = x - F.avg_pool2d(F.pad(x, (1, 1, 1, 1), mode="replicate"), 3, 1)
+        f = self.net(torch.cat([x, 4.0 * hp], 1))
+        pooled = torch.cat([f.mean((2, 3)), torch.log(f.flatten(2).std(2) + 1e-4)], 1)
+        return self.mlp(self.norm(pooled))
 
 
 class SEGate(nn.Module):
@@ -155,8 +167,12 @@ class RestoreNet(nn.Module):
         self.degr = DegradationEncoder(d_fdi, enc_width)
         # head that maps the student embedding into teacher space for the FDI-regression loss
         self.fdi_head = nn.Linear(d_fdi, teacher_dim) if teacher_dim else None
-        # optional task-ID head (RQ2 probe during training; never used to route at inference)
+        # task-ID head on the FDI embedding (RQ2); used for inferred / soft routing
         self.task_head = nn.Linear(d_fdi, n_tasks)
+        # nearest-class-mean routing (iCaRL-style): per-task mean of L2-normalised FDI
+        # embeddings, refreshed from the replay buffer after every stage; no learned params
+        self.register_buffer("protos", torch.zeros(n_tasks, d_fdi))
+        self.register_buffer("proto_n", torch.zeros(n_tasks))
 
         self.shallow = nn.Sequential(nn.Conv2d(3, 32, 3, 1, 1), nn.GELU())   # full-res features
         self.stem = nn.Sequential(nn.PixelUnshuffle(4), nn.Conv2d(32 * 16, dim, 1))
@@ -192,6 +208,16 @@ class RestoreNet(nn.Module):
         if return_feats:
             return out, {"fdi": fdi, "feats": feats}
         return out
+
+
+@torch.no_grad()
+def update_prototypes(model, lq_by_task, bs=32):
+    """lq_by_task: {task_id: LQ tensor (N,3,H,W)}. Recomputes those tasks' prototypes."""
+    dev = model.protos.device
+    for t, lq in lq_by_task.items():
+        f = torch.cat([F.normalize(model.degr(lq[i:i + bs].to(dev)).float(), dim=1) for i in range(0, len(lq), bs)])
+        model.protos[t] = F.normalize(f.mean(0), dim=0)
+        model.proto_n[t] = len(f)
 
 
 def count_params(model):

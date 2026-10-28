@@ -5,8 +5,10 @@ task adds its own (A, B) pair, so switching tasks never overwrites earlier ones:
 
     y = W x + b + (alpha / r) * B_t (A_t x)
 
-Only the adapter for the active task is applied. `set_task` is called on the
-whole model via `set_active_task(model, t)`.
+`active` is either one task key (hard routing) or a dict {key: weight}
+(soft routing: the deltas of several adapters are mixed with the given weights,
+e.g. softmax of the FDI task head; key None = base task, whose delta is zero).
+Set it on the whole model with `set_active_task(model, t)`.
 """
 import math
 
@@ -33,10 +35,19 @@ class TaskLoRALinear(nn.Module):
 
     def forward(self, x):
         y = self.base(x)
-        t = self.active
-        if t is not None and t in self.A:
-            y = y + (self.alpha / self.rank) * (x @ self.A[t].t() @ self.B[t].t())
+        for t, w in active_weights(self.active):
+            if t in self.A:
+                y = y + (w * self.alpha / self.rank) * (x @ self.A[t].t() @ self.B[t].t())
         return y
+
+
+def active_weights(active):
+    """Normalise `active` to a list of (key, weight) pairs."""
+    if active is None:
+        return []
+    if isinstance(active, dict):
+        return [(k, w) for k, w in active.items() if k is not None]
+    return [(active, 1.0)]
 
 
 def lora_modules(model):
@@ -49,7 +60,7 @@ def add_task_adapters(model, task: str):
 
 
 def set_active_task(model, task):
-    """task: str key of an adapter, or None for the base (first) task."""
+    """task: str key of an adapter, None for the base (first) task, or {key: weight} to mix."""
     for m in lora_modules(model):
         m.active = task
 
