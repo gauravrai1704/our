@@ -88,6 +88,56 @@ class LPIPSMetric:
         return self.fn(p, g).flatten().tolist()
 
 
+class NRMetrics:
+    """No-reference IQA via pyiqa (MUSIQ, MANIQA, CLIPIQA: higher is better; NIQE: lower).
+
+    The generative SR baselines (FluxIR, DiffRes, VOSR, FRAMER, DNF-SR) report these on
+    RealSR / DRealSR, so we need them to compare on their terms. Optional dependency.
+    """
+
+    def __init__(self, names, device):
+        self.fns = {}
+        if not names:
+            return
+        try:
+            import pyiqa
+        except ImportError:
+            print("pyiqa not installed; skipping no-reference metrics")
+            return
+        for n in names:
+            self.fns[n] = pyiqa.create_metric(n, device=device, as_loss=False)
+
+    @torch.no_grad()
+    def __call__(self, pred):
+        x = quantize(pred).float() / 255.0
+        return {n: f(x).flatten().tolist() for n, f in self.fns.items()}
+
+
+class Scorer:
+    """Accumulates every metric for one dataset under the fixed protocol."""
+
+    def __init__(self, task, scale, lpips_fn=None, nr_fn=None):
+        self.task, self.scale, self.lpips_fn, self.nr_fn = task, scale, lpips_fn, nr_fn
+        self.vals = {"psnr": [], "ssim": [], "lpips": []}
+
+    def add(self, pred, gt):
+        self.vals["psnr"] += psnr(pred, gt, self.task, self.scale)
+        self.vals["ssim"] += ssim(pred, gt, self.task, self.scale)
+        if self.lpips_fn is not None:
+            self.vals["lpips"] += self.lpips_fn(pred, gt)
+        if self.nr_fn is not None:
+            for n, v in self.nr_fn(pred).items():
+                self.vals.setdefault(n, []).extend(v)
+
+    def summary(self):
+        out = {}
+        for k, v in self.vals.items():
+            v = [x for x in v if not np.isnan(x)]
+            out[k] = float(np.mean(v)) if v else None
+        out["n"] = len(self.vals["psnr"])
+        return out
+
+
 # ---------------------------------------------------------------- continual learning
 def cl_summary(R, specialist=None):
     """R[i][j] = PSNR on task j after finishing training stage i (T x T, lower triangle used).

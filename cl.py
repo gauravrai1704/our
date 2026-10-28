@@ -36,10 +36,15 @@ def configure_trainable(model, stage, task_key, mode, shared_patterns):
 
 
 class EWC:
-    """Accumulates diagonal Fisher + anchor weights after each task; penalty on shared params."""
+    """Accumulates per-parameter importance + anchor weights after each task; quadratic penalty.
 
-    def __init__(self, lam=0.0):
-        self.lam = lam
+    importance="fisher" : EWC (Kirkpatrick et al. 2017), squared gradients of the task loss
+    importance="mas"    : MAS (Aljundi et al. 2018), absolute gradients of the squared L2
+                          norm of the output (label-free; pass that as loss_fn)
+    """
+
+    def __init__(self, lam=0.0, importance="fisher"):
+        self.lam, self.importance = lam, importance
         self.fisher, self.anchor = {}, {}
 
     @torch.no_grad()
@@ -61,7 +66,8 @@ class EWC:
             loss_fn(b).backward()
             for n, p in params.items():
                 if p.grad is not None:
-                    fis[n] += p.grad.detach() ** 2
+                    g = p.grad.detach()
+                    fis[n] += g.abs() if self.importance == "mas" else g ** 2
             k += 1
         for n, p in params.items():
             p.requires_grad_(req[n])
@@ -80,7 +86,8 @@ class EWC:
         return 0.5 * self.lam * tot
 
     def state_dict(self):
-        return {"lam": self.lam, "fisher": self.fisher, "anchor": self.anchor}
+        return {"lam": self.lam, "importance": self.importance, "fisher": self.fisher, "anchor": self.anchor}
 
     def load_state_dict(self, s):
         self.lam, self.fisher, self.anchor = s["lam"], s["fisher"], s["anchor"]
+        self.importance = s.get("importance", "fisher")

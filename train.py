@@ -9,9 +9,9 @@ cl.mode:
   joint    : one stage on all tasks at once, no adapters                    [joint baseline]
   (specialists = run with a single-stage config per task)
 
-Replay (cl.replay_per_task), EWC (cl.ewc_lambda) and LwF (cl.lwf) work in both
-adapters and finetune mode, so finetune + one of them gives the classic
-ER / EWC / LwF baselines (see experiments.py).
+Replay (cl.replay_per_task), EWC / MAS (cl.ewc_lambda, cl.importance: fisher | mas)
+and LwF (cl.lwf) work in both adapters and finetune mode, so finetune + one of them
+gives the classic ER / EWC / MAS / LwF baselines (see experiments.py).
 
 After every stage, all tasks in cfg.eval are evaluated -> R matrix in runs/<name>/results.json
 """
@@ -33,8 +33,8 @@ from data.datasets import PairedDataset, ReplayBuffer, SyntheticTaskDataset
 from data.degrade import TASKS
 from evaluate import build_eval_sets, evaluate
 from losses import FreqSelfDistill, RunningNorm, charbonnier
-from metrics import cl_summary
-from models.lora import add_task_adapters, set_active_task
+from metrics import NRMetrics, cl_summary
+from models.lora import adapter_parameters, add_task_adapters, set_active_task
 from models.net import RestoreNet, count_params, update_prototypes
 from models.teacher import build_teacher
 
@@ -109,11 +109,14 @@ def compute_loss(model, batches, adapter_keys, teacher, freq_mod, lw, device, fd
                 ce = torch.nn.functional.cross_entropy(model.task_head(aux["fdi"]), tid[sel])
                 total = total + lw["task"] * ce / n_groups
             if teacher is not None and lw.get("fdi", 0) > 0:
+                # fdi_max: teacher on only the first k samples of each group (BLIP-2 ViT-g is
+                # ~100x the student's FLOPs; this keeps [1]-style runs affordable)
+                k = lw.get("fdi_max") or len(x)
                 with torch.no_grad():
-                    target = teacher(x) - teacher(y)
+                    target = teacher(x[:k]) - teacher(y[:k])
                 if model.training:
                     fdi_norm.update(target)
-                pred = model.fdi_head(aux["fdi"])
+                pred = model.fdi_head(aux["fdi"][:k])
                 fl = torch.nn.functional.mse_loss(pred, fdi_norm(target))
                 loss = loss + lw["fdi"] * fl
             if freq_mod is not None and lw.get("freq", 0) > 0:
@@ -170,7 +173,7 @@ def main():
     # R-matrix columns follow STAGE order so R[j][j] = task j right after it was learned
     eval_tasks = [s["task"] for s in cfg["stages"] if s["task"] in eval_sets]
     replay = ReplayBuffer(clc.get("replay_per_task", 0)) if mode != "joint" and clc.get("replay_per_task", 0) else None
-    ewc = EWC(clc.get("ewc_lambda", 0.0))
+    ewc = EWC(clc.get("ewc_lambda", 0.0), clc.get("importance", "fisher"))
     shared = clc.get("shared_trainable", ["degr.*", "task_head.*", "fdi_head.*"])
 
     stages = cfg["stages"]
@@ -275,9 +278,21 @@ def main():
                      if ".A." not in n and ".B." not in n and any(fnmatch.fnmatch(n, s) for s in protect)}
             fb = [next(loader) for _ in range(clc.get("ewc_batches", 20))]
             model.eval()
-            ewc.consolidate(model, lambda b: compute_loss(model, [b], adapter_keys, teacher, None, {"task": lw.get("task", 0), "fdi": lw.get("fdi", 0)}, dev, fdi_norm)[0], fb, names)
+            if ewc.importance == "mas":
+                def imp_loss(b):
+                    set_active_task(model, adapter_keys.get(int(b["task"][0])))
+                    out = model(b["lq"].to(dev))
+                    set_active_task(model, None)
+                    return out.pow(2).sum((1, 2, 3)).mean()
+            else:
+                def imp_loss(b):
+                    return compute_loss(model, [b], adapter_keys, teacher, None,
+                                        {"task": lw.get("task", 0), "fdi": lw.get("fdi", 0)}, dev, fdi_norm)[0]
+            ewc.consolidate(model, imp_loss, fb, names)
 
-        res = evaluate(model, eval_sets, adapter_keys, seen, dev, routing="oracle", tile=cfg.get("eval_tile", 0))
+        # no-reference metrics only on the final stage (slow); oracle routing
+        nr = NRMetrics(cfg.get("nr_metrics"), dev) if cfg.get("nr_metrics") and si == len(stages) - 1 else None
+        res = evaluate(model, eval_sets, adapter_keys, seen, dev, routing="oracle", tile=cfg.get("eval_tile", 0), nr_fn=nr)
         multi = mode == "adapters" and len(seen) > 1
         res_inf = evaluate(model, eval_sets, adapter_keys, seen, dev, routing="inferred", tile=cfg.get("eval_tile", 0)) \
             if multi else None
@@ -298,7 +313,10 @@ def main():
         print("  R row (PSNR):", [round(x, 2) for x in R[-1]])
 
     summary = cl_summary(R) if mode != "joint" else {"ACC": R[-1]}
-    json.dump({"eval_tasks": eval_tasks, "R": R, "summary": summary, "history": history},
+    heads = sum(p.numel() for n, p in model.named_parameters() if n.startswith(("task_head", "fdi_head")))
+    params = {"deployable": count_params(model) - heads,
+              "per_adapter": {k: sum(p.numel() for p in adapter_parameters(model, k)) for k in adapter_keys.values() if k}}
+    json.dump({"eval_tasks": eval_tasks, "R": R, "summary": summary, "history": history, "params": params},
               open(os.path.join(out_dir, "results.json"), "w"), indent=2)
     print("\nsummary:", summary)
 

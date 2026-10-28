@@ -26,7 +26,7 @@ from torch.utils.data import DataLoader
 
 from data.datasets import PairedDataset, SyntheticTaskDataset
 from data.degrade import TASKS
-from metrics import LPIPSMetric, psnr, ssim
+from metrics import LPIPSMetric, NRMetrics, Scorer
 from models.lora import set_active_task
 
 
@@ -86,8 +86,11 @@ def route(model, lq, adapter_keys, seen_ids, mode="inferred", temp=1.0):
 
 @torch.no_grad()
 def evaluate(model, eval_sets, adapter_keys, seen_tasks, device, routing="oracle", tile=0, lpips_fn=None,
-             temp=1.0):
-    """adapter_keys: {task_id: adapter key or None}. Returns {task: {dataset: metrics}}."""
+             temp=1.0, nr_fn=None):
+    """adapter_keys: {task_id: adapter key or None}. Returns {task: {dataset: metrics}}.
+
+    nr_fn: optional metrics.NRMetrics; no-reference scores are added for every dataset.
+    """
     model.eval()
     lpips_fn = lpips_fn or LPIPSMetric(device)
     seen_ids = [TASKS.index(t) for t in seen_tasks]
@@ -95,7 +98,8 @@ def evaluate(model, eval_sets, adapter_keys, seen_tasks, device, routing="oracle
     for task, items in eval_sets.items():
         tid = TASKS.index(task) if task in TASKS else -1   # -1 = compound / unseen
         for name, ds, scale in items:
-            P, S, L, hit, routed = [], [], [], [], []
+            sc = Scorer(task, scale, lpips_fn, nr_fn)
+            hit, routed = [], []
             for b in DataLoader(ds, batch_size=1, num_workers=2):
                 lq, hq = b["lq"].to(device), b["hq"].to(device)
                 if (routing != "oracle" or tid < 0) and len(seen_ids) > 1:
@@ -107,14 +111,10 @@ def evaluate(model, eval_sets, adapter_keys, seen_tasks, device, routing="oracle
                 hit.append(pred_tid == tid)
                 routed.append(TASKS[pred_tid])
                 set_active_task(model, active)
-                out = tiled_forward(model, lq, tile)
-                P += psnr(out, hq, task, scale)
-                S += ssim(out, hq, task, scale)
-                L += lpips_fn(out, hq)
+                sc.add(tiled_forward(model, lq, tile), hq)
             results.setdefault(task, {})[name] = {
-                "psnr": float(np.mean(P)), "ssim": float(np.mean(S)), "lpips": float(np.nanmean(L)) if not all(np.isnan(L)) else None,
-                "task_acc": float(np.mean(hit)) if tid >= 0 else None,
-                "routed_to": {t: routed.count(t) for t in set(routed)}, "n": len(P)}
+                **sc.summary(), "task_acc": float(np.mean(hit)) if tid >= 0 else None,
+                "routed_to": {t: routed.count(t) for t in set(routed)}}
     set_active_task(model, None)
     return results
 
@@ -137,7 +137,8 @@ def main():
     else:
         from common import load_checkpoint
         model, ck, keys = load_checkpoint(a.ckpt, dev)
-    res = evaluate(model, build_eval_sets(cfg), keys, ck["seen_tasks"], dev, a.routing, a.tile, temp=a.temp)
+    nr = NRMetrics(cfg.get("nr_metrics"), dev) if cfg.get("nr_metrics") else None
+    res = evaluate(model, build_eval_sets(cfg), keys, ck["seen_tasks"], dev, a.routing, a.tile, temp=a.temp, nr_fn=nr)
     print(json.dumps(res, indent=2))
 
 

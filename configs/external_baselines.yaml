@@ -1,0 +1,111 @@
+# Methods we compare against but do not train in this repo.
+#
+# how:
+#   outputs  : obtain restored images (run official code / released results / ask authors),
+#              then score them with OUR protocol:  python eval_external.py --method <key> --outputs <dir>
+#   retrain  : retrain with official code on OUR training data (fairest for all-in-one models),
+#              then run eval_external.py on its outputs
+#   reported : no code or outputs available; copy numbers from the paper into `reported`
+#              (aggregate.py marks them with *, and the paper must say they come from a
+#              different evaluation pipeline)
+#
+# params_M / gflops: fill in from the paper or by profiling the released model. They are
+# left null on purpose: do not guess them. The code links were checked in Oct 2026 and
+# some repos were "coming soon" then, so check them again before relying on them.
+#
+# reported format:  reported: {RealSR_x4: {psnr: .., ssim: .., lpips: .., musiq: ..}}
+#   (the dataset key must match an eval dataset name in your config)
+methods:
+  # ---------------- references in the project proposal
+  ICVGIP26:
+    ref: "[1] A Lightweight Quantization-Aware Degradation-Guided Image Super-Resolution Framework (ICVGIP 2026, under review)"
+    kind: our previous work (single-task SR, BLIP-2 Q-Former FDI)
+    tasks: [sr]
+    how: retrain           # experiments.py --suite proposal trains it as icvgip_sr; or score its original outputs
+    code: this repo (icvgip_* variants)
+    params_M: null
+    gflops: null
+  FluxIR:
+    ref: "[2] Deng et al., Acquire and then Adapt: Squeezing out Text-to-Image Model for Image Restoration, CVPR 2025"
+    kind: generative, 12B Flux T2I prior + ~0.4B trainable ControlNet-style adapter
+    tasks: [sr, generic restoration]
+    how: reported          # no official code found (Oct 2026); switch to outputs if released
+    code: null
+    params_M: null
+    gflops: null
+  DiffRes:
+    ref: "[3] Wang et al., Adapting Text-to-Image Generation with Feature Difference Instruction for Generic Image Restoration, CVPR 2025"
+    kind: generative, T2I diffusion prior + Q-Former FDI (origin of our FDI idea)
+    tasks: [sr, denoise, deblur, jpeg]
+    how: reported          # no official code found (Oct 2026)
+    code: null
+    params_M: null
+    gflops: null
+  VOSR:
+    ref: "[4] Wu et al., VOSR: A Vision-Only Generative Model for Image Super-Resolution, CVPR 2026"
+    kind: generative, vision-only (pretrained vision encoder conditioning), one-step distilled
+    tasks: [sr]
+    how: outputs
+    code: https://github.com/cswry/VOSR
+    params_M: null
+    gflops: null
+  FRAMER:
+    ref: "[5] Choi et al., FRAMER: Frequency-Aligned Self-Distillation with Adaptive Modulation Leveraging Diffusion Priors for Real-World Image SR, CVPR 2026"
+    kind: generative, diffusion prior (SD2 / SD3) + frequency self-distillation
+    tasks: [sr]
+    how: reported          # project page https://cmlab-korea.github.io/FRAMER/ ; code announced
+    code: null
+    params_M: null
+    gflops: null
+  DNF-SR:
+    ref: "[6] Han et al., DNF-SR: Dual-Input and Negative-Aware Feature Fine-Tuning for Real-World Image SR, CVPR 2026"
+    kind: generative, Flux-Kontext prior, one-step, dual input
+    tasks: [sr]
+    how: reported          # "code will be released" (Oct 2026)
+    code: null
+    params_M: null
+    gflops: null
+
+  # ---------------- all-in-one / unified restoration (what reviewers will ask for)
+  AirNet:
+    ref: "Li et al., All-In-One Image Restoration for Unknown Corruption, CVPR 2022"
+    kind: all-in-one, contrastive degradation encoder (closest to our FDI routing)
+    tasks: [denoise, derain, dehaze]
+    how: retrain
+    code: https://github.com/XLearning-SCU/2022-CVPR-AirNet
+    params_M: null
+    gflops: null
+  PromptIR:
+    ref: "Potlapalli et al., PromptIR: Prompting for All-in-One Blind Image Restoration, NeurIPS 2023"
+    kind: all-in-one, learned degradation prompts
+    tasks: [denoise, derain, dehaze]
+    how: retrain
+    code: https://github.com/va1shn9v/PromptIR
+    params_M: null
+    gflops: null
+  InstructIR:
+    ref: "Conde et al., InstructIR: High-Quality Image Restoration Following Human Instructions, ECCV 2024"
+    kind: all-in-one, text-instruction conditioning (needs a task prompt; compare with our oracle routing)
+    tasks: [sr, denoise, deblur, derain, dehaze, lowlight, enhance]
+    how: retrain
+    code: https://github.com/mv-lab/InstructIR
+    params_M: null
+    gflops: null
+
+  # ---------------- single-task specialists (efficiency reference)
+  SwinIR:
+    ref: "Liang et al., SwinIR: Image Restoration Using Swin Transformer, ICCVW 2021"
+    kind: single-task specialist (one model per task)
+    tasks: [sr, denoise, jpeg]
+    how: outputs           # released pretrained models per task
+    code: https://github.com/JingyunLiang/SwinIR
+    params_M: null
+    gflops: null
+  Restormer:
+    ref: "Zamir et al., Restormer: Efficient Transformer for High-Resolution Image Restoration, CVPR 2022"
+    kind: single-task specialist
+    tasks: [denoise, deblur]
+    how: outputs
+    code: https://github.com/swz30/Restormer
+    params_M: null
+    gflops: null

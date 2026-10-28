@@ -10,6 +10,10 @@ Runs named <variant>_s<seed> are grouped by variant. Writes <out>.md and <out>.t
   Table 3  held-out compound degradations (RQ4), hard vs soft routing
   Table 4  R matrix (PSNR, stage × task) per variant
   Table 5  QAT: FP32 / PTQ / QAT ACC and BWT (if runs/<run>/qat/results.json exists)
+  Table 6  comparison with external methods ([2]-[6], all-in-one models, specialists):
+           scored outputs from runs/external/*/results.json (eval_external.py) and numbers
+           copied from papers (`reported` in configs/external_baselines.yaml, marked *),
+           next to our rows (proposed, icvgip_*, specialists)
 """
 import argparse
 import glob
@@ -55,6 +59,23 @@ def load(runs_dir):
     return groups
 
 
+def external_rows(runs_dir, registry):
+    """[(label, {task: {dataset: metrics}}, meta)] from eval_external.py outputs + reported numbers."""
+    import yaml
+    reg = yaml.safe_load(open(registry)).get("methods", {}) if os.path.exists(registry) else {}
+    rows, scored = [], set()
+    for p in sorted(glob.glob(os.path.join(runs_dir, "external", "*", "results.json"))):
+        r = json.load(open(p))
+        flat = {d: v for ds in r["results"].values() for d, v in ds.items()}
+        rows.append((r["method"], flat, reg.get(r["method"], r.get("meta", {}))))
+        scored.add(r["method"])
+    for name, meta in reg.items():
+        rep = meta.get("reported")
+        if rep and name not in scored:
+            rows.append((name + "*", rep, meta))
+    return rows
+
+
 def table(header, rows):
     md = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     md += ["| " + " | ".join(r) + " |" for r in rows]
@@ -69,6 +90,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", default="runs")
     ap.add_argument("--out", default="runs/tables")
+    ap.add_argument("--registry", default="configs/external_baselines.yaml")
+    ap.add_argument("--ours", nargs="*", default=["proposed", "icvgip_sr", "icvgip_cl", "joint", "specialist_sr",
+                                                  "specialist_denoise", "specialist_deblur", "specialist_jpeg"],
+                    help="our variants to show in the external comparison")
     a = ap.parse_args()
     groups = load(a.runs)
     if not groups:
@@ -175,6 +200,44 @@ def main():
                      ms([100 * q.get("int8_weight_coverage", float("nan")) for q in qs], 1)])
     if rows:
         emit("INT8 (ACC PSNR dB, BWT dB)", ["method", "FP32", "PTQ", "QAT", "BWT FP32", "BWT INT8", "INT8 weights %"], rows)
+
+    # ---- Table 6: external comparison (columns = dataset names)
+    ext = external_rows(a.runs, a.registry)
+    if ext:
+        cols = []
+        for _, res, _ in ext:
+            for d in res:
+                if d not in cols:
+                    cols.append(d)
+        ours = []
+        for g in a.ours:
+            if g not in groups:
+                continue
+            rs = groups[g]
+            res = {}
+            for d in cols:
+                vals = [v for r in rs for ds in r["history"][-1]["oracle"].values() for n, v in ds.items() if n == d]
+                if vals:
+                    res[d] = {k: float(np.mean([v[k] for v in vals])) for k in vals[0]
+                              if isinstance(vals[0][k], float) and all(v.get(k) is not None for v in vals)}
+            p = rs[0].get("params", {}).get("deployable")
+            ours.append((f"ours: {g}", res, {"params_M": p / 1e6 if p else None}))
+        metric_keys = []
+        for _, res, _ in ext + ours:
+            for v in res.values():
+                for k in v:
+                    if k not in metric_keys and k not in ("n", "task_acc", "routed_to"):
+                        metric_keys.append(k)
+        rows = []
+        for name, res, meta in ext + ours:
+            row = [name, "–" if meta.get("params_M") is None else f"{meta['params_M']:.2f}"]
+            for d in cols:
+                v = res.get(d)
+                row.append(" / ".join("–" if not v or v.get(k) is None else
+                                      f"{v[k]:.4f}" if k in ("ssim", "lpips") else f"{v[k]:.2f}" for k in metric_keys))
+            rows.append(row)
+        emit("Comparison with other methods (* = numbers reported in the paper, not re-scored)",
+             ["method", "params (M)"] + [f"{d} ({'/'.join(metric_keys)})" for d in cols], rows)
 
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     open(a.out + ".md", "w").write("\n".join(md_parts))

@@ -8,7 +8,15 @@ Configs go to configs/generated/<variant>_s<seed>.yaml and runs to runs/<variant
 Runs whose results.json already exists are skipped, so --run can be resumed.
 
 Suites
-  main     : specialists (one per task), joint, finetune, ER, EWC, LwF, adapters-only, proposed
+  main     : specialists (one per task), joint, finetune, ER, EWC, MAS, LwF, adapters-only, proposed
+  proposal : our ICVGIP model [1] reproduced (BLIP-2 Q-Former FDI, no freq / dual loss) as an
+             SR specialist and trained sequentially, then a cumulative ladder that adds one
+             upgrade from the proposal at a time:
+               icvgip_cl  = [1] + adapters/replay/EWC
+               +dino      = DINOv2 teacher instead of BLIP-2 Q-Former      [4]
+               +freq      = + frequency self-distillation                  [5]
+               +dual      = + dual input  (= proposed)                     [6]
+             External methods ([2]-[6], all-in-one models) are scored with eval_external.py.
   ablation : the proposed method with one component changed at a time
   order    : the proposed method and finetune under reversed and shuffled task orders
 """
@@ -43,6 +51,27 @@ def _no_cl(cfg, mode):
 def _baseline(cfg, **kw):
     """finetune + one CL component. kw values must be read BEFORE _no_cl resets them."""
     return _cl(_no_cl(cfg, "finetune"), **kw)
+
+
+TEACHER_1 = {"name": "blip2"}  # FDI teacher of [1]; --blip2 overrides it (e.g. "random" offline)
+
+
+def icvgip(step=0):
+    """Our ICVGIP model [1] plus the first `step` upgrades of the proposal.
+
+    step 0: BLIP-2 Q-Former FDI, no frequency / dual-input loss   (= [1])
+    step 1: + DINOv2 teacher (the base config's teacher)          [4]
+    step 2: + frequency self-distillation                         [5]
+    (step 3, + dual input [6], is the base config itself = "proposed")
+    """
+    def f(cfg):
+        teacher, freq = cfg.get("teacher"), cfg.get("loss", {}).get("freq", 0.05)
+        cfg = _loss(cfg, freq=0.0, dual=0.0)
+        cfg["teacher"] = teacher if step >= 1 else TEACHER_1["name"]
+        if step >= 2:
+            cfg = _loss(cfg, freq=freq)
+        return cfg
+    return f
 
 
 def specialist(task):
@@ -83,11 +112,21 @@ SUITES = {
         "finetune": lambda c: _no_cl(c, "finetune"),
         "er": lambda c: _baseline(c, replay_per_task=c["cl"].get("replay_per_task") or 500),
         "ewc": lambda c: _baseline(c, ewc_lambda=c["cl"].get("ewc_lambda") or 100.0),
+        "mas": lambda c: _baseline(c, ewc_lambda=c["cl"].get("ewc_lambda") or 100.0, importance="mas"),
         "lwf": lambda c: _baseline(c, lwf=1.0),
         "adapters_only": lambda c: _no_cl(c, "adapters"),
         "proposed": lambda c: c,
     },
+    "proposal": {
+        "icvgip_sr": _then(specialist("sr"), icvgip(0)),          # [1] as published: SR only
+        "icvgip_seq_finetune": _then(icvgip(0), lambda c: _no_cl(c, "finetune")),  # [1] trained naively
+        "icvgip_cl": icvgip(0),                                     # [1] + our continual learning
+        "icvgip_cl_dino": icvgip(1),
+        "icvgip_cl_dino_freq": icvgip(2),
+        # last rung (+ dual input) = "proposed" in the main suite
+    },
     "ablation": {
+        "abl_blip2_teacher": lambda c: {**c, "teacher": TEACHER_1["name"]},
         "abl_no_replay": lambda c: _cl(c, replay_per_task=0),
         "abl_no_ewc": lambda c: _cl(c, ewc_lambda=0.0),
         "abl_replay100": lambda c: _cl(c, replay_per_task=100),
@@ -141,9 +180,11 @@ def main():
     ap.add_argument("--only", nargs="*", default=None, help="variant names to keep")
     ap.add_argument("--scale", type=float, default=1.0, help="multiply all iters (pilot runs)")
     ap.add_argument("--out", default="configs/generated")
+    ap.add_argument("--blip2", default="blip2", help='teacher used for [1]; "random" for offline smoke tests')
     ap.add_argument("--run", action="store_true")
     ap.add_argument("--qat", action="store_true", help="also run qat.py after each training run")
     a = ap.parse_args()
+    TEACHER_1["name"] = a.blip2
     base = yaml.safe_load(open(a.base))
     os.makedirs(a.out, exist_ok=True)
     cfgs = build(base, a.suite, a.seeds, a.scale)

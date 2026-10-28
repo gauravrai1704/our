@@ -6,3 +6,5 @@ lpips          # optional, LPIPS metric
 scikit-image   # optional, metric cross-check
 onnx           # INT8 export
 onnxruntime    # export parity check / CPU latency
+transformers   # BLIP-2 Q-Former teacher for the ICVGIP [1] baseline
+pyiqa          # optional, no-reference metrics (MUSIQ, MANIQA, CLIPIQA, NIQE)
