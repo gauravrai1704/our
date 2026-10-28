@@ -9,6 +9,10 @@ cl.mode:
   joint    : one stage on all tasks at once, no adapters                    [joint baseline]
   (specialists = run with a single-stage config per task)
 
+Replay (cl.replay_per_task), EWC (cl.ewc_lambda) and LwF (cl.lwf) work in both
+adapters and finetune mode, so finetune + one of them gives the classic
+ER / EWC / LwF baselines (see experiments.py).
+
 After every stage, all tasks in cfg.eval are evaluated -> R matrix in runs/<name>/results.json
 """
 import argparse
@@ -17,6 +21,7 @@ import fnmatch
 import json
 import math
 import os
+import random
 import time
 
 import torch
@@ -30,7 +35,7 @@ from evaluate import build_eval_sets, evaluate
 from losses import FreqSelfDistill, RunningNorm, charbonnier
 from metrics import cl_summary
 from models.lora import add_task_adapters, set_active_task
-from models.net import RestoreNet, count_params
+from models.net import RestoreNet, count_params, update_prototypes
 from models.teacher import build_teacher
 
 
@@ -77,37 +82,62 @@ def lr_at(it, total, base, warmup):
 
 
 # ---------------------------------------------------------------- one step
-def compute_loss(model, batch, adapter_keys, teacher, freq_mod, lw, device, fdi_norm=None):
-    """Batch may mix tasks (current + replay): forward each task group with its own adapter."""
-    lq, hq, tid = batch["lq"].to(device), batch["hq"].to(device), batch["task"].to(device)
-    logs, total = {}, 0.0
-    for t in tid.unique().tolist():
-        sel = tid == t
-        set_active_task(model, adapter_keys.get(t))
-        x, y = lq[sel], hq[sel]
-        out, aux = model(x, return_feats=True)
-        loss = charbonnier(out, y)
-        logs["rec"] = logs.get("rec", 0) + loss.item() * sel.float().mean().item()
+def compute_loss(model, batches, adapter_keys, teacher, freq_mod, lw, device, fdi_norm=None, lwf=None):
+    """batches: list of batches (current task + replay; patch sizes may differ between them).
 
-        if lw.get("task", 0) > 0:
-            ce = torch.nn.functional.cross_entropy(model.task_head(aux["fdi"]), tid[sel])
-            loss = loss + lw["task"] * ce
-        if teacher is not None and lw.get("fdi", 0) > 0:
+    Each task group is forwarded with its own adapter; group losses are weighted by
+    their share of all samples. lwf = (prev_model, old_keys, weight): L1 distillation of
+    the previous stage's outputs under each old adapter, on the current-task inputs.
+    """
+    n_total = sum(len(b["lq"]) for b in batches)
+    # the task CE is class-balanced (each task group weighs 1/G): weighting by sample share
+    # would let the current task dominate and bias routing toward the newest task
+    n_groups = sum(len(b["task"].unique()) for b in batches)
+    logs, total = {"rec": 0.0}, 0.0
+    for batch in batches:
+        lq, hq, tid = batch["lq"].to(device), batch["hq"].to(device), batch["task"].to(device)
+        for t in tid.unique().tolist():
+            sel = tid == t
+            w = sel.sum().item() / n_total
+            set_active_task(model, adapter_keys.get(t))
+            x, y = lq[sel], hq[sel]
+            out, aux = model(x, return_feats=True)
+            loss = charbonnier(out, y)
+            logs["rec"] += loss.item() * w
+
+            if lw.get("task", 0) > 0:
+                ce = torch.nn.functional.cross_entropy(model.task_head(aux["fdi"]), tid[sel])
+                total = total + lw["task"] * ce / n_groups
+            if teacher is not None and lw.get("fdi", 0) > 0:
+                with torch.no_grad():
+                    target = teacher(x) - teacher(y)
+                if model.training:
+                    fdi_norm.update(target)
+                pred = model.fdi_head(aux["fdi"])
+                fl = torch.nn.functional.mse_loss(pred, fdi_norm(target))
+                loss = loss + lw["fdi"] * fl
+            if freq_mod is not None and lw.get("freq", 0) > 0:
+                f = aux["feats"]
+                loss = loss + lw["freq"] * freq_mod(f[len(f) // 2 - 1], f[-1])
+            if lw.get("dual", 0) > 0:
+                x2 = x + torch.randn_like(x) * (lw.get("dual_sigma", 2.0) / 255.0)
+                out2 = model(x2)
+                loss = loss + lw["dual"] * (charbonnier(out2, y) + charbonnier(out2, out.detach()))
+            total = total + loss * w
+    if lwf is not None:
+        prev, old_keys, wt = lwf
+        x = batches[0]["lq"].to(device)
+        dl = 0.0
+        for k in old_keys:
+            set_active_task(model, k)
+            set_active_task(prev, k)
             with torch.no_grad():
-                target = teacher(x) - teacher(y)
-            if model.training:
-                fdi_norm.update(target)
-            pred = model.fdi_head(aux["fdi"])
-            fl = torch.nn.functional.mse_loss(pred, fdi_norm(target))
-            loss = loss + lw["fdi"] * fl
-        if freq_mod is not None and lw.get("freq", 0) > 0:
-            f = aux["feats"]
-            loss = loss + lw["freq"] * freq_mod(f[len(f) // 2 - 1], f[-1])
-        if lw.get("dual", 0) > 0:
-            x2 = x + torch.randn_like(x) * (lw.get("dual_sigma", 2.0) / 255.0)
-            out2 = model(x2)
-            loss = loss + lw["dual"] * (charbonnier(out2, y) + charbonnier(out2, out.detach()))
-        total = total + loss * sel.float().mean()
+                ref = prev(x)
+            dl = dl + torch.nn.functional.l1_loss(model(x), ref)
+        set_active_task(prev, None)
+        dl = dl / len(old_keys)
+        logs["lwf"] = dl.item()
+        total = total + wt * dl
     set_active_task(model, None)
     return total, logs
 
@@ -119,6 +149,7 @@ def main():
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     torch.manual_seed(cfg.get("seed", 0))
+    random.seed(cfg.get("seed", 0))
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     out_dir = os.path.join("runs", cfg["name"])
     os.makedirs(out_dir, exist_ok=True)
@@ -138,7 +169,7 @@ def main():
     eval_sets = build_eval_sets(cfg)
     # R-matrix columns follow STAGE order so R[j][j] = task j right after it was learned
     eval_tasks = [s["task"] for s in cfg["stages"] if s["task"] in eval_sets]
-    replay = ReplayBuffer(clc.get("replay_per_task", 0)) if mode == "adapters" and clc.get("replay_per_task", 0) else None
+    replay = ReplayBuffer(clc.get("replay_per_task", 0)) if mode != "joint" and clc.get("replay_per_task", 0) else None
     ewc = EWC(clc.get("ewc_lambda", 0.0))
     shared = clc.get("shared_trainable", ["degr.*", "task_head.*", "fdi_head.*"])
 
@@ -176,19 +207,25 @@ def main():
         ema = EMA(model, cfg.get("ema", 0.999))
         loader = infinite(DataLoader(train_set, batch_size=st["batch"], shuffle=True,
                                      num_workers=cfg.get("workers", 4), drop_last=True))
-        n_rep = int(st["batch"] * clc.get("replay_ratio", 0.25)) if replay and replay.tasks() else 0
+        n_rep = max(1, int(st["batch"] * clc.get("replay_ratio", 0.25))) if replay and replay.tasks() else 0
+        lwf = None
+        if clc.get("lwf", 0) > 0 and si > 0 and mode != "joint":
+            prev = copy.deepcopy(model).eval()
+            for p in prev.parameters():
+                p.requires_grad_(False)
+            old_keys = sorted({adapter_keys[TASKS.index(t)] for t in seen[:-1]}, key=lambda k: k or "")
+            lwf = (prev, old_keys, clc["lwf"])
         scaler = torch.amp.GradScaler("cuda", enabled=(dev == "cuda" and cfg.get("amp", True)))
 
         model.train()
         for it in range(st["iters"]):
-            batch = next(loader)
+            batches = [next(loader)]
             if n_rep:
-                rb = replay.sample(n_rep)
-                batch = {k: torch.cat([batch[k], rb[k]]) for k in ("lq", "hq", "task")}
+                batches.append(replay.sample(n_rep))
             for g in opt.param_groups:
                 g["lr"] = lr_at(it, st["iters"], st["lr"], st.get("warmup", 1000))
             with torch.autocast(dev, enabled=(dev == "cuda" and cfg.get("amp", True))):
-                loss, logs = compute_loss(model, batch, adapter_keys, teacher, freq_mod, lw, dev, fdi_norm)
+                loss, logs = compute_loss(model, batches, adapter_keys, teacher, freq_mod, lw, dev, fdi_norm, lwf)
                 pen = ewc.penalty(model)
                 if pen is not None:
                     loss = loss + pen
@@ -200,7 +237,8 @@ def main():
             scaler.update()
             ema.update(model)
             if it % cfg.get("log_every", 100) == 0:
-                print(f"  it {it:6d}  loss {loss.item():.4f}  rec {logs['rec']:.4f}  lr {opt.param_groups[0]['lr']:.2e}")
+                extra = f"  lwf {logs['lwf']:.4f}" if "lwf" in logs else ""
+                print(f"  it {it:6d}  loss {loss.item():.4f}  rec {logs['rec']:.4f}{extra}  lr {opt.param_groups[0]['lr']:.2e}")
 
         # ---- end of stage: fill replay, EWC consolidation, eval with EMA weights
         live = copy.deepcopy(model.state_dict())
@@ -213,25 +251,50 @@ def main():
                 need -= len(b["lq"])
                 if need <= 0:
                     break
-        if ewc.lam > 0 and mode == "adapters":
+        # NCM prototypes: from the replay buffer when there is one (old tasks re-embedded with
+        # the current encoder), otherwise only the tasks of this stage are (re)computed
+        if replay is not None:
+            proto_src = {t: torch.stack([l for l, _ in v]) for t, v in replay.store.items()}
+        else:
+            proto_src = {}
+            for b in DataLoader(train_set, batch_size=32, shuffle=True, num_workers=0):
+                for t in b["task"].unique().tolist():
+                    proto_src.setdefault(t, []).append(b["lq"][b["task"] == t])
+                if sum(len(x) for v in proto_src.values() for x in v) >= 256 * len(tasks_here):
+                    break
+            proto_src = {t: torch.cat(v) for t, v in proto_src.items()}
+        model.eval()
+        update_prototypes(model, proto_src)
+        for k in ("protos", "proto_n"):
+            ema.shadow[k] = live[k] = model.state_dict()[k].clone()
+
+        if ewc.lam > 0 and mode != "joint":
+            # adapters: protect the shared trainable params; finetune: protect everything
+            protect = shared if mode == "adapters" else ["*"]
             names = {n for n, p in model.named_parameters()
-                     if ".A." not in n and ".B." not in n and any(fnmatch.fnmatch(n, s) for s in shared)}
+                     if ".A." not in n and ".B." not in n and any(fnmatch.fnmatch(n, s) for s in protect)}
             fb = [next(loader) for _ in range(clc.get("ewc_batches", 20))]
             model.eval()
-            ewc.consolidate(model, lambda b: compute_loss(model, b, adapter_keys, teacher, None, {"task": lw.get("task", 0), "fdi": lw.get("fdi", 0)}, dev, fdi_norm)[0], fb, names)
+            ewc.consolidate(model, lambda b: compute_loss(model, [b], adapter_keys, teacher, None, {"task": lw.get("task", 0), "fdi": lw.get("fdi", 0)}, dev, fdi_norm)[0], fb, names)
 
         res = evaluate(model, eval_sets, adapter_keys, seen, dev, routing="oracle", tile=cfg.get("eval_tile", 0))
+        multi = mode == "adapters" and len(seen) > 1
         res_inf = evaluate(model, eval_sets, adapter_keys, seen, dev, routing="inferred", tile=cfg.get("eval_tile", 0)) \
-            if mode == "adapters" and len(seen) > 1 else None
+            if multi else None
+        res_soft = evaluate(model, eval_sets, adapter_keys, seen, dev, routing="soft", tile=cfg.get("eval_tile", 0)) \
+            if multi else None
+        res_ncm = evaluate(model, eval_sets, adapter_keys, seen, dev, routing="ncm", tile=cfg.get("eval_tile", 0)) \
+            if multi else None
         # R row: mean PSNR over that task's eval sets
         R.append([float(sum(v["psnr"] for v in res[t].values()) / len(res[t])) if t in res else float("nan")
                   for t in eval_tasks])
-        history.append({"stage": si, "tasks": tasks_here, "oracle": res, "inferred": res_inf,
+        history.append({"stage": si, "tasks": tasks_here, "oracle": res, "inferred": res_inf, "ncm": res_ncm, "soft": res_soft,
                         "minutes": (time.time() - t0) / 60})
         torch.save({"model": live, "ema": ema.shadow, "adapter_keys": adapter_keys, "seen_tasks": seen,
                     "teacher_dim": teacher.dim if teacher else 0, "fdi_norm": fdi_norm.state_dict() if fdi_norm else None, "replay": replay.state_dict() if replay else None,
                     "ewc": ewc.state_dict(), "cfg": cfg}, os.path.join(out_dir, f"stage{si}.pt"))
         model.load_state_dict(live)
+        lwf = prev = None  # free the previous-stage copy
         print("  R row (PSNR):", [round(x, 2) for x in R[-1]])
 
     summary = cl_summary(R) if mode != "joint" else {"ACC": R[-1]}

@@ -18,7 +18,8 @@ import torch.nn as nn
 import yaml
 
 from data.degrade import TASKS
-from models.lora import TaskLoRALinear, add_task_adapters, adapter_parameters, set_active_task
+from models.lora import (TaskLoRALinear, active_weights, add_task_adapters, adapter_parameters,
+                         set_active_task)
 from models.net import WindowAttention
 
 
@@ -37,8 +38,9 @@ def count_macs(model, x):
     def lora_hook(m, i, o):
         rows = o.numel() // m.base.out_features
         macs[0] += rows * m.base.in_features * m.base.out_features
-        if m.active is not None and m.active in m.A:
-            macs[0] += rows * m.rank * (m.base.in_features + m.base.out_features)
+        for t, _ in active_weights(m.active):
+            if t in m.A:
+                macs[0] += rows * m.rank * (m.base.in_features + m.base.out_features)
 
     def attn_hook(m, i, o):
         B, H, W, C = i[0].shape

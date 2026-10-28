@@ -23,7 +23,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .lora import TaskLoRALinear
+from .lora import TaskLoRALinear, active_weights
 
 
 class ActQuant(nn.Module):
@@ -98,12 +98,13 @@ class QTaskLoRALinear(TaskLoRALinear):
         on = self.q_enabled
         xq = self.in_q(x) if on else x
         y = F.linear(xq, fq_weight(self.base.weight, on), self.base.bias)
-        t = self.active
-        if t is not None and t in self.A:
+        for t, w in active_weights(self.active):
+            if t not in self.A:
+                continue
             mid = xq @ fq_weight(self.A[t], on).t()
             if on:
                 mid = self.mid_q[t](mid)
-            y = y + (self.alpha / self.rank) * (mid @ fq_weight(self.B[t], on).t())
+            y = y + (w * self.alpha / self.rank) * (mid @ fq_weight(self.B[t], on).t())
         return y
 
     def add_task(self, task):

@@ -117,6 +117,7 @@ def main():
     else:
         print("WARNING: no --hq_dir; probing on eval sets (content differs per task, accuracy is optimistic)")
         X, y, img = embed_eval_sets(model, ck["cfg"], tasks, dev)
+    assert len(X), f"no images usable (all smaller than --crop {a.crop}?)"
     classes = sorted(set(y.tolist()))
     tr, te = split_by_image(img)
     names = [TASKS[c] for c in classes]

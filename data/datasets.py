@@ -34,6 +34,12 @@ def to_tensor(x):
     return torch.from_numpy(np.ascontiguousarray(x.transpose(2, 0, 1)))
 
 
+def train_rng():
+    """numpy RNG derived from torch's RNG, so torch.manual_seed (and the per-worker
+    seeds DataLoader derives from it) make training crops/degradations reproducible."""
+    return np.random.default_rng(int(torch.randint(0, 2 ** 62, (1,)).item()))
+
+
 def augment(*arrs, rng):
     k, flip = int(rng.integers(4)), bool(rng.integers(2))
     out = []
@@ -65,7 +71,7 @@ class SyntheticTaskDataset(Dataset):
         path = self.files[i % len(self.files)]
         hq = load_rgb(path)
         if self.train:
-            rng = np.random.default_rng()
+            rng = train_rng()
             (hq,) = random_crop(rng, self.patch, hq)
             (hq,) = augment(hq, rng=rng)
             lq = degrade(np.ascontiguousarray(hq), self.task, rng)
@@ -105,7 +111,7 @@ class PairedDataset(Dataset):
             lq = np.asarray(im.resize((hq.shape[1], hq.shape[0]), _I.BICUBIC), dtype=np.float32) / 255.0
         assert lq.shape == hq.shape, f"shape mismatch {self.lq[j]} {lq.shape} vs {hq.shape}"
         if self.train:
-            rng = np.random.default_rng()
+            rng = train_rng()
             lq, hq = random_crop(rng, self.patch, lq, hq)
             lq, hq = augment(lq, hq, rng=rng)
         return {"lq": to_tensor(lq), "hq": to_tensor(hq), "task": TASK_ID.get(self.task, -1),
