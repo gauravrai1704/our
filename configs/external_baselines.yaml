@@ -66,6 +66,24 @@ methods:
     params_M: null
     gflops: null
 
+  # ---------------- closest prior work: continual learning across degradations (MUST compare)
+  RwF:
+    ref: "Ashrafee & Krawczyk, Restoring Without Forgetting: Continual Learning Across Image Degradations, arXiv 2608.23799 (Aug 2026)"
+    kind: continual restoration; frozen pretrained backbone + lightweight per-domain modules, label-free routing
+    tasks: [deblur, denoise, dehaze, derain, lowlight]
+    how: retrain           # check the paper for code; otherwise reimplement or use reported numbers
+    code: null             # not checked (arxiv.org unreachable from the sandbox)
+    params_M: null
+    gflops: null
+  RestoreMore:
+    ref: "Gao & Ma (SJTU), RestoreMore: continual capability expansion for image restoration (venue not checked)"
+    kind: continual restoration
+    tasks: null
+    how: reported
+    code: null
+    params_M: null
+    gflops: null
+
   # ---------------- all-in-one / unified restoration (what reviewers will ask for)
   AirNet:
     ref: "Li et al., All-In-One Image Restoration for Unknown Corruption, CVPR 2022"
