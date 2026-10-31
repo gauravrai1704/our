@@ -7,7 +7,10 @@ from models.lora import add_task_adapters
 
 
 def load_checkpoint(path, device, use_ema=True):
-    """Rebuild the FP32 model (with all adapters) from a train.py stage checkpoint."""
+    """Rebuild the model (with all adapters) from a train.py stage checkpoint.
+
+    FP32 unless the run used qat.continual = quantized, in which case the fake-quant
+    INT8 model is rebuilt."""
     from train import build_model
     ck = torch.load(path, map_location=device, weights_only=False)
     cfg = ck["cfg"]
@@ -16,7 +19,12 @@ def load_checkpoint(path, device, use_ema=True):
     for k in keys.values():
         if k is not None:
             add_task_adapters(model, k)
+    if ck.get("quantized"):  # trained with qat.continual = quantized: rebuild the fake-quant model
+        from models.quant import prepare_qat, set_act_mode
+        prepare_qat(model, ck["quantized"]["keep_fp"], ck["quantized"]["quant_attn"])
     model.load_state_dict(ck["ema"] if use_ema and ck.get("ema") else ck["model"])
+    if ck.get("quantized"):
+        set_act_mode(model, "quant")
     return model.to(device).eval(), ck, keys
 
 

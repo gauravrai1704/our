@@ -155,6 +155,19 @@ the same value in every run you compare.
 Before trusting any number, reproduce one published baseline with this script
 (e.g. download released SwinIR outputs on Set5 ×4 and score them here).
 
+## INT8 after every task (`qat.continual`, `--suite quant`)
+
+| Setting | What it measures |
+|---|---|
+| `none` + `qat.py` | quantize once at the end |
+| `snapshot` | after every task: copy FP32 → calibrate on replay of all seen tasks → `stage_iters` of balanced QAT with KD from FP32 → evaluate. Gives an INT8 R matrix next to the FP32 one (`R_int8`, `stage<k>_int8.pt`) |
+| `quantized` | the model is INT8 from task 1 on; later tasks are learned directly under fake-quant. The INT8 base never changes, so each new task ships as INT8 adapters. This is the deploy-once edge setting and the strongest answer to RQ3 |
+
+In `quantized` mode only the new adapters' activation observers are calibrated (for the
+first `observer_warmup` iterations of their stage); every other range stays frozen, so
+old tasks are not disturbed through the quantizers. AMP is off once the model is
+fake-quant, which makes those stages slower.
+
 ## INT8 scheme (qat.py / models/quant.py)
 
 * **Weights:** per-output-channel symmetric INT8, with scales recomputed every step.
@@ -175,8 +188,6 @@ Before trusting any number, reproduce one published baseline with this script
 
 ## Not done yet
 
-* QAT after every stage (the secondary RQ3 setting). The current `qat.py` quantizes once
-  at the end.
 * Real CCTV frames (no-reference metrics only).
 * NR metrics are wired in (`nr_metrics`) but untested in this repo's sandbox: pyiqa
   downloads its weights on first use.

@@ -67,6 +67,62 @@ def calibrate(model, patches, adapter_keys, device, n_batches, bs=8):
     set_act_mode(model, "quant")
 
 
+def qat_params(q, which="all"):
+    """Trainable params for QAT: all | adapters. Sets requires_grad accordingly."""
+    if which == "adapters":
+        params = [p for n, p in q.named_parameters() if ".A." in n or ".B." in n]
+    else:
+        params = [p for n, p in q.named_parameters() if not n.startswith(("task_head", "fdi_head"))]
+    for p in q.parameters():
+        p.requires_grad_(False)
+    for p in params:
+        p.requires_grad_(True)
+    return params
+
+
+def qat_train(q, fp, patches, keys, qc, dev, params, iters, observe=True):
+    """Task-balanced QAT: Charbonnier + kd * L1 to the FP reference `fp` (None = no KD).
+
+    observe=True: all activation observers keep updating for the first
+    qc["observer_warmup"] iters, then freeze. observe=False leaves observer modes as set.
+    """
+    opt = torch.optim.AdamW(params, lr=qc["lr"], weight_decay=0.0)
+    gen = balanced_batches(patches, keys, qc["batch"])
+    if observe:
+        set_act_mode(q, "observe_quant")
+    for it in range(iters):
+        if observe and it == min(qc["observer_warmup"], iters - 1):
+            set_act_mode(q, "quant")  # freeze observers
+        q.train()
+        lr = 0.5 * qc["lr"] * (1 + math.cos(math.pi * it / iters))
+        for g in opt.param_groups:
+            g["lr"] = lr
+        loss, groups = 0.0, next(gen)
+        for t, (lq, hq) in groups.items():
+            lq, hq = lq.to(dev), hq.to(dev)
+            set_active_task(q, keys[t])
+            out = q(lq)
+            loss = loss + charbonnier(out, hq)
+            if fp is not None and qc["kd"] > 0:
+                set_active_task(fp, keys[t])
+                with torch.no_grad():
+                    ref = fp(lq)
+                loss = loss + qc["kd"] * F.l1_loss(out, ref)
+        loss = loss / len(groups)
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(params, 0.5)
+        opt.step()
+        if it % qc["log_every"] == 0:
+            print(f"  qat it {it:6d}  loss {loss.item():.4f}  lr {lr:.2e}")
+    set_active_task(q, None)
+    if fp is not None:
+        set_active_task(fp, None)
+    if observe:
+        set_act_mode(q, "quant")
+    q.eval()
+
+
 @torch.no_grad()
 def holdout_psnr(model, patches, adapter_keys, device, n=32):
     """Fast proxy for the sensitivity sweep: mean RGB PSNR on a few patches of every task."""
@@ -154,6 +210,9 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     fp, ck, keys = load_checkpoint(ckpt, dev)
+    if ck.get("quantized"):
+        raise SystemExit(f"{ckpt} was trained with qat.continual=quantized and is already INT8 (fake-quant); "
+                         "evaluate it with evaluate.py --ckpt instead")
     for p in fp.parameters():
         p.requires_grad_(False)
     seen = ck["seen_tasks"]
@@ -193,41 +252,9 @@ def main():
 
     # ---------------- QAT
     if not a.skip_qat and qc["iters"] > 0:
-        if qc["train"] == "adapters":
-            params = [p for n, p in q.named_parameters() if ".A." in n or ".B." in n]
-        else:
-            params = [p for n, p in q.named_parameters() if not n.startswith(("task_head", "fdi_head"))]
-        for p in q.parameters():
-            p.requires_grad_(False)
-        for p in params:
-            p.requires_grad_(True)
-        opt = torch.optim.AdamW(params, lr=qc["lr"], weight_decay=0.0)
-        gen = balanced_batches(patches, keys, qc["batch"])
-        set_act_mode(q, "observe_quant")
+        params = qat_params(q, qc["train"])
         print(f"\n[QAT] iters={qc['iters']} lr={qc['lr']} trainable={sum(p.numel() for p in params):,}")
-        for it in range(qc["iters"]):
-            if it == qc["observer_warmup"]:
-                set_act_mode(q, "quant")  # freeze observers
-            q.train()
-            lr = 0.5 * qc["lr"] * (1 + math.cos(math.pi * it / qc["iters"]))
-            for g in opt.param_groups:
-                g["lr"] = lr
-            loss = 0.0
-            for t, (lq, hq) in next(gen).items():
-                lq, hq = lq.to(dev), hq.to(dev)
-                set_active_task(q, keys[t])
-                set_active_task(fp, keys[t])
-                out = q(lq)
-                with torch.no_grad():
-                    ref = fp(lq)
-                loss = loss + charbonnier(out, hq) + qc["kd"] * F.l1_loss(out, ref)
-            loss = loss / len(keys)
-            opt.zero_grad(set_to_none=True)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(params, 0.5)
-            opt.step()
-            if it % qc["log_every"] == 0:
-                print(f"  it {it:6d}  loss {loss.item():.4f}  lr {lr:.2e}")
+        qat_train(q, fp, patches, keys, qc, dev, params, qc["iters"])
         set_active_task(q, None)
         set_active_task(fp, None)
         set_act_mode(q, "quant")

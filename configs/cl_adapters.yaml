@@ -71,6 +71,8 @@ eval:
     - {name: DIV2Kval_down_noise, type: synthetic, hq_dir: datasets/DIV2K/valid_HR,
        params: {chain: [[sr, {scale: 2}], [denoise, {sigma: 25}]]}}
 qat:
+  continual: none           # none | snapshot | quantized  (INT8 after every task; see train.py)
+  stage_iters: 1000         # QAT iters after each task (snapshot) / at conversion (quantized)
   per_task: 500             # replay patches per task (calibration + QAT data)
   calib_batches: 16
   batch: 16                 # task-balanced

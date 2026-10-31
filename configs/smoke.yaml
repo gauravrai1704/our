@@ -102,6 +102,8 @@ eval:
         - quality: 30
 log_every: 1000
 qat:
+  continual: none
+  stage_iters: 30
   per_task: 16
   calib_batches: 2
   batch: 8

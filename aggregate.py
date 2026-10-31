@@ -10,6 +10,7 @@ Runs named <variant>_s<seed> are grouped by variant. Writes <out>.md and <out>.t
   Table 3  held-out compound degradations (RQ4), hard vs soft routing
   Table 4  R matrix (PSNR, stage × task) per variant
   Table 5  QAT: FP32 / PTQ / QAT ACC and BWT (if runs/<run>/qat/results.json exists)
+  Table 5b INT8 after every task (qat.continual snapshot / quantized): ACC, BWT, INT8 R matrix
   Table 6  comparison with external methods ([2]-[6], all-in-one models, specialists):
            scored outputs from runs/external/*/results.json (eval_external.py) and numbers
            copied from papers (`reported` in configs/external_baselines.yaml, marked *),
@@ -200,6 +201,30 @@ def main():
                      ms([100 * q.get("int8_weight_coverage", float("nan")) for q in qs], 1)])
     if rows:
         emit("INT8 (ACC PSNR dB, BWT dB)", ["method", "FP32", "PTQ", "QAT", "BWT FP32", "BWT INT8", "INT8 weights %"], rows)
+
+    # ---- Table 5b: INT8 after every task (train.py qat.continual)
+    rows = []
+    for g, rs in sorted(cl_groups.items()):
+        qm = rs[0].get("qat_continual", "none")
+        if qm == "snapshot":
+            fp_s = [r["summary"] for r in rs]
+            q_s = [r["summary_int8"] for r in rs]
+        elif qm == "quantized":
+            fp_s, q_s = [{} for _ in rs], [r["summary"] for r in rs]
+        else:
+            continue
+        rows.append([g, qm, ms([x.get("ACC") for x in fp_s]), ms([x.get("ACC") for x in q_s]),
+                     ms([x.get("BWT") for x in fp_s]), ms([x.get("BWT") for x in q_s]), ms([x.get("FGT") for x in q_s])])
+    if rows:
+        emit("INT8 after every task (snapshot: QAT copy of the FP32 model; quantized: INT8 from task 1 on)",
+             ["method", "mode", "ACC FP32", "ACC INT8", "BWT FP32", "BWT INT8", "FGT INT8"], rows)
+        for g, rs in sorted(cl_groups.items()):
+            if rs[0].get("R_int8"):
+                R = np.mean([np.asarray(r["R_int8"], float) for r in rs], 0)
+                order = rs[0]["eval_tasks"]
+                emit(f"INT8 R matrix (snapshot): {g}", ["stage"] + order,
+                     [[f"after {rs[0]['history'][i]['tasks'][0]}"] + [f"{v:.2f}" if j <= i else f"({v:.2f})"
+                                                                      for j, v in enumerate(R[i])] for i in range(R.shape[0])])
 
     # ---- Table 6: external comparison (columns = dataset names)
     ext = external_rows(a.runs, a.registry)

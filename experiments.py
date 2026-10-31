@@ -19,6 +19,8 @@ Suites
              External methods ([2]-[6], all-in-one models) are scored with eval_external.py.
   ablation : the proposed method with one component changed at a time
   order    : the proposed method and finetune under reversed and shuffled task orders
+  quant    : INT8 after every task (RQ3): snapshot QAT of the FP32 model after each task, and
+             fully quantized continual learning (INT8 from task 1 on), for proposed / ER / finetune
 """
 import argparse
 import copy
@@ -72,6 +74,11 @@ def icvgip(step=0):
             cfg = _loss(cfg, freq=freq)
         return cfg
     return f
+
+
+def _qat(cfg, continual):
+    cfg["qat"] = {**cfg.get("qat", {}), "continual": continual}
+    return cfg
 
 
 def specialist(task):
@@ -142,6 +149,12 @@ SUITES = {
         "abl_no_freq": lambda c: _loss(c, freq=0.0),
         "abl_no_dual": lambda c: _loss(c, dual=0.0),
         "abl_no_taskce": lambda c: _loss(c, task=0.0),
+    },
+    "quant": {
+        "proposed_q_snapshot": lambda c: _qat(c, "snapshot"),
+        "proposed_q_quantized": lambda c: _qat(c, "quantized"),
+        "er_q_quantized": lambda c: _qat(_baseline(c, replay_per_task=c["cl"].get("replay_per_task") or 500), "quantized"),
+        "finetune_q_quantized": lambda c: _qat(_no_cl(c, "finetune"), "quantized"),
     },
     "order": {
         "order_rev_proposed": reorder(["jpeg", "deblur", "denoise", "sr"]),
