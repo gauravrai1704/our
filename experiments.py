@@ -194,6 +194,9 @@ def main():
     ap.add_argument("--scale", type=float, default=1.0, help="multiply all iters (pilot runs)")
     ap.add_argument("--out", default="configs/generated")
     ap.add_argument("--blip2", default="blip2", help='teacher used for [1]; "random" for offline smoke tests')
+    ap.add_argument("--shard", default="0/1", help="i/n: run every n-th config starting at i (one per GPU)")
+    ap.add_argument("--eval_on", default="eval", choices=["eval", "val"],
+                    help="val = hyperparameter search on the val split; eval = final test numbers")
     ap.add_argument("--run", action="store_true")
     ap.add_argument("--qat", action="store_true", help="also run qat.py after each training run")
     a = ap.parse_args()
@@ -203,15 +206,20 @@ def main():
     cfgs = build(base, a.suite, a.seeds, a.scale)
     if a.only:
         cfgs = [c for c in cfgs if c["variant"] in a.only]
-    for cfg in cfgs:
+    si, sn = map(int, a.shard.split("/"))
+    for i, cfg in enumerate(cfgs):
         path = os.path.join(a.out, cfg["name"] + ".yaml")
         yaml.safe_dump(cfg, open(path, "w"), sort_keys=False)
-        done = os.path.exists(os.path.join("runs", cfg["name"], "results.json"))
+        if i % sn != si:
+            continue
+        run_name = cfg["name"] + ("_val" if a.eval_on == "val" else "")
+        done = os.path.exists(os.path.join("runs", run_name, "results.json"))
         print(f"{'[done] ' if done else ''}{path}")
         if not a.run or done:
             continue
-        subprocess.run([sys.executable, "train.py", "--config", path], check=True)
-        if a.qat and cfg["cl"].get("mode") != "joint":
+        subprocess.run([sys.executable, "train.py", "--config", path, "--eval_on", a.eval_on, "--resume"], check=True)
+        if a.qat and cfg["cl"].get("mode") != "joint" and a.eval_on == "eval" \
+                and cfg.get("qat", {}).get("continual", "none") != "quantized":
             subprocess.run([sys.executable, "qat.py", "--config", path], check=True)
 
 

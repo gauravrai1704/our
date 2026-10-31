@@ -48,10 +48,14 @@ def acc(res, tasks, key="psnr"):
     return float(np.mean(vals)) if res and all(v is not None for v in vals) else None
 
 
-def load(runs_dir):
+def load(runs_dir, val=False):
+    """val=False: test runs only; val=True: only runs made with --eval_on val (suffix _val)."""
     groups = defaultdict(list)
     for p in sorted(glob.glob(os.path.join(runs_dir, "*", "results.json"))):
         name = os.path.basename(os.path.dirname(p))
+        if name.endswith("_val") != val:
+            continue
+        name = name[:-4] if val else name
         r = json.load(open(p))
         r["name"] = name
         q = os.path.join(os.path.dirname(p), "qat", "results.json")
@@ -92,11 +96,12 @@ def main():
     ap.add_argument("--runs", default="runs")
     ap.add_argument("--out", default="runs/tables")
     ap.add_argument("--registry", default="configs/external_baselines.yaml")
+    ap.add_argument("--val", action="store_true", help="tabulate the --eval_on val runs (hyperparameter search)")
     ap.add_argument("--ours", nargs="*", default=["proposed", "icvgip_sr", "icvgip_cl", "joint", "specialist_sr",
                                                   "specialist_denoise", "specialist_deblur", "specialist_jpeg"],
                     help="our variants to show in the external comparison")
     a = ap.parse_args()
-    groups = load(a.runs)
+    groups = load(a.runs, a.val)
     if not groups:
         print("no runs found")
         return

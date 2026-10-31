@@ -34,6 +34,8 @@ configs/smoke.yaml   2-minute CPU end-to-end test on toy data
 configs/cl_adapters.yaml  real run
 ```
 
+See **[RUNBOOK.md](RUNBOOK.md)** for the full GPU-machine procedure (setup, datasets, splits, training, testing, tables).
+
 ## Quick start
 
 ```bash

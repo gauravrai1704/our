@@ -8,6 +8,7 @@ ReplayBuffer         : fixed-size per-task reservoir of (LQ, HQ) patches kept on
 import glob
 import os
 import random
+import re
 
 import numpy as np
 import torch
@@ -85,6 +86,29 @@ class SyntheticTaskDataset(Dataset):
                 "name": os.path.basename(path)}
 
 
+def _stem(p):
+    return os.path.splitext(os.path.basename(p))[0]
+
+
+def pair_by_stem(lq, hq, lq_dir="", hq_dir=""):
+    """Match LQ to HQ files by filename stem, allowing an SR suffix on the LQ side
+    (babyx4.png <-> baby.png). Sorted-order pairing breaks when one name is a prefix of
+    another ("ab" sorts before "a_x4"), so it is only a fallback for unrelated names."""
+    assert lq and len(lq) == len(hq), f"{lq_dir}: {len(lq)} vs {hq_dir}: {len(hq)} images"
+    by_stem = {_stem(h): h for h in hq}
+    out = []
+    for f in lq:
+        s = _stem(f)
+        h = by_stem.get(s) or by_stem.get(re.sub(r"[_-]?[xX]\d$", "", s))
+        if h is None:
+            break
+        out.append((f, h))
+    if len(out) == len(lq) and len({h for _, h in out}) == len(hq):
+        return [a for a, _ in out], [b for _, b in out]
+    print(f"WARNING {lq_dir}: filenames do not match {hq_dir} by stem; pairing by sorted order")
+    return lq, hq
+
+
 class PairedDataset(Dataset):
     """lq_dir/hq_dir with matching sorted filenames.
 
@@ -93,8 +117,7 @@ class PairedDataset(Dataset):
     """
 
     def __init__(self, lq_dir, hq_dir, task, patch=128, train=True, sr_scale=None, repeat=1):
-        self.lq, self.hq = list_images(lq_dir), list_images(hq_dir)
-        assert self.lq and len(self.lq) == len(self.hq), f"{lq_dir}: {len(self.lq)} vs {hq_dir}: {len(self.hq)}"
+        self.lq, self.hq = pair_by_stem(list_images(lq_dir), list_images(hq_dir), lq_dir, hq_dir)
         self.task, self.patch, self.train, self.sr_scale, self.repeat = task, patch, train, sr_scale, repeat
 
     def __len__(self):

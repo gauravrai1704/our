@@ -52,6 +52,14 @@ stages:
     train:
       - {type: synthetic, hq_dir: datasets/DF2K/HR, repeat: 10}
       - {type: synthetic, hq_dir: datasets/BSD400, repeat: 10}
+# Validation split (scripts/build_splits.py): use it for every hyperparameter choice
+# (EWC lambda, replay size, LoRA rank, loss weights) via  --eval_on val.  Test sets
+# under eval: are only for the final numbers.
+val:
+  sr:      [{name: val_x4,    type: synthetic, hq_dir: datasets/val/HR, params: {scale: 4}}]
+  denoise: [{name: val_s25,   type: synthetic, hq_dir: datasets/val/HR, params: {sigma: 25}}]
+  deblur:  [{name: GoPro_val, type: paired, lq_dir: datasets/GoPro/val/blur, hq_dir: datasets/GoPro/val/sharp}]
+  jpeg:    [{name: val_q20,   type: synthetic, hq_dir: datasets/val/HR, params: {quality: 20}}]
 eval:
   sr:
     - {name: Set5_x4,     type: paired, lq_dir: datasets/benchmark/Set5/LR_bicubic/X4,     hq_dir: datasets/benchmark/Set5/HR,     sr_scale: 4}

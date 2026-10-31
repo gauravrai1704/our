@@ -280,7 +280,7 @@ def main():
             return [sum(v["psnr"] for v in res[t].values()) / len(res[t]) for t in order]
         fq_row = row(final)
         T = len(order)
-        if T > 1:
+        if T > 1 and len(R) == T:  # one eval column per stage, in stage order
             results["bwt_fp32"] = sum(R[-1][j] - R[j][j] for j in range(T - 1)) / (T - 1)
             results[f"bwt_{tag}"] = sum(fq_row[j] - R[j][j] for j in range(T - 1)) / (T - 1)
     print(f"\n{'dataset':28s} {'FP32':>7s} {'PTQ':>7s} {tag.upper():>7s} {'Δ':>7s}")

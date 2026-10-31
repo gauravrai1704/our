@@ -197,8 +197,14 @@ def r_row(res, eval_tasks):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
+    ap.add_argument("--eval_on", default="eval", choices=["eval", "val"],
+                    help="eval = test sets (final numbers); val = cfg.val sets (hyperparameter search)")
+    ap.add_argument("--resume", action="store_true", help="skip stages whose checkpoint exists in runs/<name>/")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
+    if args.eval_on == "val":
+        assert cfg.get("val"), "config has no val: section"
+        cfg = {**cfg, "eval": cfg["val"], "name": cfg["name"] + "_val"}
     torch.manual_seed(cfg.get("seed", 0))
     random.seed(cfg.get("seed", 0))
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -236,6 +242,15 @@ def main():
     quantized = False  # True once the model itself is fake-quant (qmode == "quantized")
 
     adapter_keys, seen, R, R_int8, history = {}, [], [], [], []
+    n_done = 0
+    partial = os.path.join(out_dir, "results_partial.json")
+    if args.resume and os.path.exists(partial):
+        prog = json.load(open(partial))
+        n_done = len(prog["history"])
+        while n_done and not os.path.exists(os.path.join(out_dir, f"stage{n_done - 1}.pt")):
+            n_done -= 1
+        R, R_int8, history = prog["R"][:n_done], prog.get("R_int8", [])[:n_done], prog["history"][:n_done]
+        print(f"resuming {cfg['name']}: stages 0..{n_done - 1} done")
     for si, st in enumerate(stages):
         t0 = time.time()
         if st["task"] == "joint":
@@ -253,6 +268,26 @@ def main():
                 adapter_keys.setdefault(tid, None)
             seen.append(t)
         model.to(dev)
+
+        if si < n_done:  # resume: restore the state at the end of the last finished stage
+            if si == n_done - 1:
+                ck = torch.load(os.path.join(out_dir, f"stage{si}.pt"), map_location=dev, weights_only=False)
+                if ck.get("quantized") and not quantized:
+                    prepare_qat(model, ck["quantized"]["keep_fp"], ck["quantized"]["quant_attn"])
+                    model.to(dev)
+                    quantized = True
+                model.load_state_dict(ck["model"])
+                if quantized:
+                    set_act_mode(model, "quant")
+                if replay is not None and ck.get("replay"):
+                    replay.load_state_dict(ck["replay"])
+                if ck.get("ewc"):
+                    ewc.load_state_dict(ck["ewc"])
+                if fdi_norm is not None and ck.get("fdi_norm"):
+                    fdi_norm.load_state_dict(ck["fdi_norm"])
+                if freq_mod is not None and ck.get("freq_mod"):
+                    freq_mod.load_state_dict(ck["freq_mod"])
+            continue
 
         params = configure_trainable(model, si, tasks_here[-1], mode, shared)
         if freq_mod is not None:
@@ -402,20 +437,23 @@ def main():
         torch.save({"model": live, "ema": ema.shadow, "adapter_keys": adapter_keys, "seen_tasks": seen,
                     "teacher_dim": teacher.dim if teacher else 0, "fdi_norm": fdi_norm.state_dict() if fdi_norm else None, "replay": replay.state_dict() if replay else None,
                     "ewc": ewc.state_dict(), "cfg": cfg,
+                    "freq_mod": freq_mod.state_dict() if freq_mod is not None else None,
                     "quantized": {"keep_fp": qc["keep_fp"], "quant_attn": qc["quant_attn"]} if quantized else None},
                    os.path.join(out_dir, f"stage{si}.pt"))
+        json.dump({"R": R, "R_int8": R_int8, "history": history}, open(partial, "w"))
         model.load_state_dict(live)
         lwf = prev = None  # free the previous-stage copy
         print("  R row (PSNR):", [round(x, 2) for x in R[-1]])
 
-    summary = cl_summary(R) if mode != "joint" else {"ACC": R[-1]}
+    learned_at = [[s["task"] for s in stages].index(t) for t in eval_tasks] if mode != "joint" else None
+    summary = cl_summary(R, learned_at=learned_at) if mode != "joint" else {"ACC": R[-1]}
     heads = sum(p.numel() for n, p in model.named_parameters() if n.startswith(("task_head", "fdi_head")))
     params = {"deployable": count_params(model) - heads,
               "per_adapter": {k: sum(p.numel() for p in adapter_parameters(model, k)) for k in adapter_keys.values() if k}}
     out = {"eval_tasks": eval_tasks, "R": R, "summary": summary, "history": history, "params": params,
            "qat_continual": qmode}  # with "quantized", R itself is the INT8 R matrix
     if R_int8:
-        out["R_int8"], out["summary_int8"] = R_int8, cl_summary(R_int8)
+        out["R_int8"], out["summary_int8"] = R_int8, cl_summary(R_int8, learned_at=learned_at)
         print("summary INT8 (snapshot):", out["summary_int8"])
     json.dump(out,
               open(os.path.join(out_dir, "results.json"), "w"), indent=2)

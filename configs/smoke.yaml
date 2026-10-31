@@ -64,6 +64,11 @@ stages:
   train:
   - type: synthetic
     hq_dir: toy_data/train/hq
+val:
+  sr:
+  - {name: toyval_x4, type: synthetic, hq_dir: toy_data/train/hq, params: {scale: 4}}
+  denoise:
+  - {name: toyval_s25, type: synthetic, hq_dir: toy_data/train/hq, params: {sigma: 25}}
 eval:
   sr:
   - name: toy_x4

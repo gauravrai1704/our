@@ -139,20 +139,24 @@ class Scorer:
 
 
 # ---------------------------------------------------------------- continual learning
-def cl_summary(R, specialist=None):
-    """R[i][j] = PSNR on task j after finishing training stage i (T x T, lower triangle used).
+def cl_summary(R, specialist=None, learned_at=None):
+    """R[i][j] = PSNR on task j after finishing training stage i (lower triangle used).
 
+    learned_at[j] = stage index at which column j's task was trained (default j, i.e. one
+    column per stage in stage order). Columns trained in the last stage get no BWT/FGT term.
     ACC : mean final-row performance
-    BWT : mean_{j<T-1} (R[T-1][j] - R[j][j])          (negative = forgetting, in dB)
-    FGT : mean_{j<T-1} (max_{i<T-1} R[i][j] - R[T-1][j])
+    BWT : mean_j (R[T-1][j] - R[s_j][j])                  (negative = forgetting, in dB)
+    FGT : mean_j (max_{s_j <= i < T-1} R[i][j] - R[T-1][j])
     rel : optional per-task drop vs specialist model (dB), comparable across tasks
     """
     R = np.asarray(R, dtype=float)
     T = R.shape[0]
+    learned_at = list(range(R.shape[1])) if learned_at is None else list(learned_at)
     out = {"ACC": float(np.nanmean(R[-1]))}
-    if T > 1:
-        out["BWT"] = float(np.mean([R[-1, j] - R[j, j] for j in range(T - 1)]))
-        out["FGT"] = float(np.mean([np.nanmax(R[j:T - 1, j]) - R[-1, j] for j in range(T - 1)]))
+    old = [(j, s) for j, s in enumerate(learned_at) if s < T - 1]
+    if T > 1 and old:
+        out["BWT"] = float(np.mean([R[-1, j] - R[s, j] for j, s in old]))
+        out["FGT"] = float(np.mean([np.nanmax(R[s:T - 1, j]) - R[-1, j] for j, s in old]))
     if specialist is not None:
         out["drop_vs_specialist"] = (R[-1] - np.asarray(specialist, float)).tolist()
     return out
